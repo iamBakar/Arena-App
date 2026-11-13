@@ -1,0 +1,38 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // A person's profile. Only they can read it. After creation they may change only their icon.
+    match /users/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['username', 'usernameLower', 'avatar', 'createdAt'])
+        && request.resource.data.username is string
+        && request.resource.data.usernameLower is string
+        && request.resource.data.usernameLower.matches('^[a-z0-9_]{3,20}$')
+        && request.resource.data.username.lower() == request.resource.data.usernameLower
+        && request.resource.data.avatar is string
+        && request.resource.data.avatar.size() <= 8
+        && request.resource.data.createdAt == request.time
+        && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.usernameLower)).data.uid == request.auth.uid;
+      allow update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['avatar'])
+        && request.resource.data.avatar is string
+        && request.resource.data.avatar.size() <= 8;
+      allow delete: if false;
+    }
+
+    // Username reservations. Anyone may check one name (needed at sign-up) but nobody can list them.
+    // A signed-in person can reserve only the one name that matches their own profile.
+    match /usernames/{name} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if request.auth != null
+        && name.matches('^[a-z0-9_]{3,20}$')
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.usernameLower == name;
+      allow update, delete: if false;
+    }
+  }
+}

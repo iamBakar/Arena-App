@@ -10,6 +10,7 @@
   const FORMATS = { league: 'League', knockout: 'Knockout', groups: 'Groups + knockout' };
   const dark = matchMedia('(prefers-color-scheme: dark)');
   const dlg = $('#dlg'), view = $('#view');
+  let acct = { mode: 'loading', user: null, profile: null };   // loading | local | out | noprofile | in
 
   /* ---------- Toast ---------- */
   let toastTimer;
@@ -34,8 +35,9 @@
 
   /* ---------- Profile ---------- */
   function renderProfileChip() {
-    const p = Store.get().profile;
-    $('#profileBtn').innerHTML = p ? `<span>${esc(p.avatar)}</span><span>${esc(p.name)}</span>` : '<span>Create profile</span>';
+    const p = Store.get().profile, b = $('#profileBtn');
+    b.hidden = ['loading', 'out', 'noprofile'].includes(acct.mode);
+    b.innerHTML = p ? `<span>${esc(p.avatar)}</span><span>${esc(p.name)}</span>` : '<span>Create profile</span>';
   }
 
   function openProfile(first) {
@@ -52,11 +54,7 @@
           <button class="btn primary">Save profile</button>
           ${first ? '' : '<button type="button" class="btn" id="closeDlg">Close</button>'}
         </div>
-        ${first ? '' : `<hr><h3>Backup</h3>
-          <p class="mute">Your data is saved in this browser only. Export a file to keep a copy, or import one to restore.</p>
-          <div class="row"><button type="button" class="btn" id="exp">Export backup</button>
-          <button type="button" class="btn" id="imp">Import backup</button>
-          <input type="file" id="file" accept=".json,application/json" hidden></div>${installBlock()}`}
+        ${first ? '' : extrasHtml()}
       </form>`;
     if (!dlg.open) dlg.showModal();
 
@@ -68,16 +66,34 @@
       dlg.close(); toast(first ? 'Profile created. Welcome, ' + name + '!' : 'Profile saved.');
     });
     const close = $('#closeDlg'); if (close) close.addEventListener('click', () => dlg.close());
-    if (!first) {
-      $('#exp').addEventListener('click', exportBackup);
-      $('#imp').addEventListener('click', () => $('#file').click());
-      $('#file').addEventListener('change', importBackup);
-      const inst = $('#inst');
-      if (inst) inst.addEventListener('click', () => { installPrompt.prompt(); installPrompt = null; dlg.close(); });
-    }
+    if (!first) bindExtras();
   }
-  $('#profileBtn').addEventListener('click', () => openProfile(!Store.get().profile));
+  $('#profileBtn').addEventListener('click', () => (acct.mode === 'in' ? openAccount() : openProfile(!Store.get().profile)));
   dlg.addEventListener('cancel', e => { if (!Store.get().profile) e.preventDefault(); }); // profile is required first
+
+  const extrasHtml = () => `<hr><h3>Backup</h3>
+    <p class="mute">Tournaments are saved in this browser. Export a file to keep a copy, or import one to restore.</p>
+    <div class="row"><button type="button" class="btn" id="exp">Export backup</button>
+    <button type="button" class="btn" id="imp">Import backup</button>
+    <input type="file" id="file" accept=".json,application/json" hidden></div>${installBlock()}`;
+  function bindExtras() {
+    $('#exp').addEventListener('click', exportBackup);
+    $('#imp').addEventListener('click', () => $('#file').click());
+    $('#file').addEventListener('change', importBackup);
+    const inst = $('#inst');
+    if (inst) inst.addEventListener('click', () => { installPrompt.prompt(); installPrompt = null; dlg.close(); });
+  }
+  function openAccount() {
+    const p = Store.get().profile || {};
+    dlg.innerHTML = `<form id="pf"><h2>${esc(p.avatar || '')} ${esc(p.name || '')}</h2>
+      <p class="mute">${esc((acct.user && acct.user.email) || '')}</p>
+      <div class="row"><button type="button" class="btn" id="logout">Log out</button><button type="button" class="btn" id="closeDlg">Close</button></div>
+      ${extrasHtml()}</form>`;
+    if (!dlg.open) dlg.showModal();
+    $('#closeDlg').addEventListener('click', () => dlg.close());
+    $('#logout').addEventListener('click', async () => { dlg.close(); await Cloud.logOut(); toast('Logged out.'); });
+    bindExtras();
+  }
 
   /* ---------- Install as an app ---------- */
   let installPrompt = null;
@@ -138,6 +154,11 @@
   let lastHash = '';
   function route() {
     const h = location.hash || '#/';
+    if (acct.mode === 'loading') { view.innerHTML = '<p class="empty glass">Loading...</p>'; return; }
+    if (acct.mode === 'out' || acct.mode === 'noprofile') {
+      if (dlg.open) dlg.close();
+      Auth.render(view, acct.mode === 'noprofile' ? '#/profile' : h); return;
+    }
     if (!Store.get().profile) { openProfile(true); view.innerHTML = ''; return; }
     if (h === '#/new') Setup.render(view);
     else if (h.startsWith('#/t/')) Tournament.render(view, decodeURIComponent(h.slice(4)));
@@ -150,6 +171,21 @@
   function refresh() { applyTheme(); renderProfileChip(); }
   Store.subscribe(() => { refresh(); if (dlg.open === false) route(); else if (Store.get().profile) route(); });
   window.addEventListener('hashchange', route);
+  function onCloud(s) {
+    if (!s.user) acct = { mode: 'out', user: null, profile: null };
+    else if (!s.profile) acct = { mode: 'noprofile', user: s.user, profile: null };
+    else {
+      acct = { mode: 'in', user: s.user, profile: s.profile };
+      const cur = Store.get().profile;
+      if (!cur || cur.uid !== s.user.uid || cur.name !== s.profile.username || cur.avatar !== s.profile.avatar)
+        Store.commit(st => { st.profile = { name: s.profile.username, avatar: s.profile.avatar, uid: s.user.uid }; });
+    }
+    refresh(); route();
+  }
+  const startCloud = () => Cloud.onAuth(onCloud);
+  if (window.Cloud) startCloud(); else window.addEventListener('cloud-ready', startCloud, { once: true });
+  setTimeout(() => { if (acct.mode === 'loading') { acct = { mode: 'local', user: null, profile: null }; refresh(); route(); } }, 6000);   // could not reach Firebase: keep working locally
+
   refresh(); route();
   if (!Store.isPersistent()) toast('This browser blocks saving. Export a backup before closing.');
 })();
