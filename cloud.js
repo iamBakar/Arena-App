@@ -6,7 +6,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword,
   signOut, sendPasswordResetEmail, sendEmailVerification } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, doc, getDoc, writeBatch, serverTimestamp, collection, query, where, getDocs,
-  runTransaction, deleteDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  runTransaction, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const app = initializeApp(window.FIREBASE_CONFIG);
 const auth = getAuth(app);
@@ -34,10 +34,7 @@ const MSG = {
   'app/username-taken': 'That username is already taken. Choose another one.',
   'app/not-signed-in': 'Please log in first.',
   'app/conflict': 'This tournament was changed on another device.',
-  'app/code-failed': 'Could not make a share code. Please try again.',
-  'app/bad-code': 'That code does not look right. Codes have 6 letters and numbers.',
-  'permission-denied': 'Access was refused. Make sure you are logged in with a verified email.',
-  'unavailable': 'No internet connection. Try again when you are online.'
+  'app/code-failed': 'Could not make a share code. Please try again.'
 };
 const friendly = e => MSG[e && e.code] || 'Something went wrong. Please try again.';
 const coded = code => Object.assign(new Error(code), { code });
@@ -141,49 +138,16 @@ async function saveTournament(t) {
   });
   t.rev = rev;
 }
-const parseT = d => { const x = d.data(), t = JSON.parse(x.data); t.id = d.id; t.rev = x.rev; t.ownerId = x.ownerId; return t; };
 async function loadMine() {
   const snap = await getDocs(query(collection(db, 'tournaments'), where('ownerId', '==', auth.currentUser.uid)));
-  return snap.docs.map(parseT);
+  return snap.docs.map(d => { const x = d.data(), t = JSON.parse(x.data); t.id = d.id; t.rev = x.rev; t.ownerId = x.ownerId; return t; });
 }
 const deleteTournament = id => deleteDoc(tref(id));
-
-/* ---------- Spectating: live view-only access by share code, and the Following list ---------- */
-const normCode = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-const validCode = c => /^[A-HJ-NP-Z2-9]{6}$/.test(c);
-// Calls onData(tournament, meta) now and again every time the host saves. onData(null) = no such tournament.
-function watchTournament(code, onData, onError) {
-  return onSnapshot(tref(code), snap => {
-    if (!snap.exists()) return onData(null);
-    try { const x = snap.data(); onData(parseT(snap), { ownerName: x.ownerName, status: x.status, championName: x.championName }); }
-    catch (e) { onError(e); }
-  }, onError);
-}
-async function peekTournament(code) {
-  const s = await getDoc(tref(code));
-  if (!s.exists()) return null;
-  const x = s.data();
-  return { name: x.name, game: x.game, ownerName: x.ownerName, status: x.status, championName: x.championName };
-}
-const fcol = () => collection(db, 'users', auth.currentUser.uid, 'following');
-async function follow(code, info) {
-  if (!auth.currentUser) throw coded('app/not-signed-in');
-  await setDoc(doc(fcol(), code), { code, name: String(info.name).slice(0, 60), game: String(info.game).slice(0, 40),
-    ownerName: String(info.ownerName || '').slice(0, 20), followedAt: Date.now() });
-  track('follow_tournament');
-}
-const unfollow = code => deleteDoc(doc(fcol(), code));
-async function loadFollowing() {
-  if (!auth.currentUser) throw coded('app/not-signed-in');
-  const snap = await getDocs(fcol());
-  return snap.docs.map(d => d.data()).sort((a, b) => b.followedAt - a.followedAt);
-}
 
 window.Cloud = {
   onAuth(f) { listeners.push(f); if (last.ready) f(last); },
   signUp, logIn, claimProfile, checkVerified, resendVerification, friendly, validUsername, track,
   newCode, saveTournament, loadMine, deleteTournament,
-  normCode, validCode, watchTournament, peekTournament, follow, unfollow, loadFollowing,
   note: () => note,
   logOut: () => signOut(auth),
   resetPassword: email => sendPasswordResetEmail(auth, String(email).trim(), { url: verifyUrl() })
