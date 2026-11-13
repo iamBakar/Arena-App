@@ -6,7 +6,7 @@
   const $ = s => document.querySelector(s);
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const dlg = $('#dlg');
-  let t = null, view = null, opened = {}, tab = 'fixtures', curId = null;
+  let t = null, view = null, opened = {}, tab = 'fixtures', curId = null, ro = null;   // ro = view-only (spectator) options, or null for the host
 
   const nm = id => { const p = t.players.find(x => x.id === id); return p ? p.name : 'To be decided'; };
   const e = id => esc(nm(id));
@@ -51,7 +51,7 @@
     const done = isDone(m), ready = m.a && m.b;
     const mid = m.result ? `<b class="score">${resText(m)}</b>` : '<span class="vs">vs</span>';
     const label = done ? 'Edit' : (m.result ? 'Enter leg 2' : 'Enter result');
-    const btn = (ready && !locked) ? `<button class="btn sm" data-act="enter" data-id="${m.id}">${label}</button>` : '<span></span>';
+    const btn = (ready && !locked && !ro) ? `<button class="btn sm" data-act="enter" data-id="${m.id}">${label}</button>` : '<span></span>';
     return `<div class="mrow ${done ? 'played' : ''}"><span class="tm a">${e(m.a)}</span>${mid}<span class="tm b">${e(m.b)}</span>${btn}</div>`;
   }
 
@@ -93,13 +93,51 @@
     return `<div class="panel glass go"><h3>${t.format === 'league' ? 'League complete' : 'Group stage complete'}</h3>
       <p>${esc(q.label)}. They enter the knockout in this order:</p>
       <ol class="qual">${seeds.map(id => `<li>${e(id)}</li>`).join('')}</ol>
-      <button class="btn primary" data-act="start-ko">Start knockout</button></div>`;
+      ${ro ? '' : '<button class="btn primary" data-act="start-ko">Start knockout</button>'}</div>`;
   }
 
   function render(el, id) {
-    view = el; t = Store.get().tournaments.find(x => x.id === id);
+    ro = null; view = el; t = Store.get().tournaments.find(x => x.id === id);
     if (curId !== id) { tab = 'fixtures'; curId = id; }
-    if (!t) { view.innerHTML = '<section><h2>Tournament not found</h2><p><a href="#/">Back to home</a></p></section>'; return; }
+    if (!t) {
+      view.innerHTML = '<section><h2>Tournament not found</h2>' + (isCode(id) ? '<p><a href="#/watch/' + esc(id) + '">Open it as a viewer</a></p>' : '') + '<p><a href="#/">Back to home</a></p></section>';
+      return;
+    }
+    draw();
+  }
+
+  // View-only page for a tournament someone else hosts. Called again on every live update.
+  function show(el, data, opts) {
+    ro = opts || {}; view = el; t = data;
+    const key = 'watch:' + data.id, y = window.scrollY;
+    if (curId !== key) { tab = 'fixtures'; curId = key; }
+    draw();
+    window.scrollTo(0, y);
+  }
+  const redraw = () => (ro ? draw() : render(view, t.id));
+  const isCode = id => /^[A-HJ-NP-Z2-9]{6}$/.test(id);
+  const watchUrl = () => location.origin + location.pathname + '#/watch/' + t.id;
+  function copy(text, ok) {
+    const done = () => { if (window.toast) toast(ok); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => prompt('Copy this:', text));
+    else prompt('Copy this:', text);
+  }
+  async function shareLink() {
+    const msg = 'Follow "' + t.name + '" live on Arena. Code: ' + t.id;
+    if (navigator.share) {
+      try { await navigator.share({ title: t.name, text: msg, url: watchUrl() }); return; }
+      catch (err) { if (err && err.name === 'AbortError') return; }
+    }
+    copy(msg + '\n' + watchUrl(), 'Link copied.');
+  }
+  function codeBox() {
+    if (!isCode(t.id)) return '';
+    return `<div class="codebox glass"><small>Share code</small><b class="code">${esc(t.id)}</b>
+      <div class="row"><button class="btn sm" data-act="copy-code">Copy code</button><button class="btn sm" data-act="share-link">Share link</button></div>
+      <p class="mute">Anyone with an Arena account can enter this code to watch live. They can only view, never change anything.</p></div>`;
+  }
+
+  function draw() {
     if ((tab === 'bracket' && !t.ko) || (tab === 'table' && !t.groups.length)) tab = 'fixtures';
     const fmt = { league: 'League', knockout: 'Knockout', groups: 'Groups + knockout' }[t.format];
     const ko = koList().filter(m => !m.bye), all = allGroup().concat(ko);
@@ -111,14 +149,15 @@
       body = koSection();
       if (t.format !== 'knockout') body += `<details class="round" data-key="grp-results"><summary>Group stage results<span>locked</span></summary>
         ${t.groups.map(g => groupSection(g, true)).join('')}
-        <p class="mute rest">These are locked because the knockout has started. <button class="link" data-act="reopen">Reopen the group stage</button> (this clears the knockout).</p></details>`;
+        <p class="mute rest">These are locked because the knockout has started.${ro ? '' : ' <button class="link" data-act="reopen">Reopen the group stage</button> (this clears the knockout).'}</p></details>`;
     } else body = t.groups.map(g => groupSection(g, false)).join('');
 
     const content = tab === 'table' ? tablesHtml() : tab === 'bracket' ? bracketHtml() : `<h2 class="fx">Fixtures</h2>${body}`;
     view.innerHTML = `<section class="tpage">
-      <p><a href="#/">&larr; All tournaments</a></p>
+      <p><a href="#/">&larr; ${ro ? 'Home' : 'All tournaments'}</a></p>
       <h1 class="tt">${esc(t.name)}</h1>
       <p class="mute">${esc(t.game)}, ${fmt}, ${t.players.length} entries</p>
+      ${ro ? (ro.banner || '') : codeBox()}
       <p><button class="btn sm" data-act="pdf">Share as PDF</button></p>
       <div class="bar" aria-label="${pct}% played"><i style="width:${pct}%"></i></div>
       <p class="mute">${played} of ${all.length} matches played${t.stage === 'groups' || (t.stage === 'league' && t.settings.qualifier) ? ' (knockout matches are added later)' : ''}</p>
@@ -126,10 +165,10 @@
       ${stagePanel()}
       ${next && !t.championName || (next && t.stage === 'knockout') ? `<div class="panel glass next"><small>Next match</small>
         <div class="mrow"><span class="tm a">${e(next.a)}</span><span class="vs">vs</span><span class="tm b">${e(next.b)}</span>
-        <button class="btn primary sm" data-act="enter" data-id="${next.id}">Enter result</button></div>
+        ${ro ? '' : `<button class="btn primary sm" data-act="enter" data-id="${next.id}">Enter result</button>`}</div>
         ${next.roundName ? `<p class="mute">${esc(next.roundName)}</p>` : ''}</div>` : ''}
       ${tabsHtml()}${content}
-      <p class="danger"><button class="link" data-act="delete">Delete this tournament</button></p></section>`;
+      ${ro ? '' : '<p class="danger"><button class="link" data-act="delete">Delete this tournament</button></p>'}</section>`;
     view.onclick = onClick;
   }
 
@@ -197,14 +236,17 @@
     if (sum) { const d = sum.parentNode; setTimeout(() => { opened[d.dataset.key] = d.open; }, 0); return; }
     const a = ev.target.closest('[data-act]'); if (!a) return;
     const act = a.dataset.act;
-    if (act === 'enter') openEntry(a.dataset.id);
+    if (ro && act !== 'tab' && act !== 'pdf') { if (ro.onAct) ro.onAct(act); return; }   // viewers can never edit
+    if (act === 'copy-code') copy(t.id, 'Code copied.');
+    else if (act === 'share-link') shareLink();
+    else if (act === 'enter') openEntry(a.dataset.id);
     else if (act === 'pdf') {
       a.disabled = true;
       Exporter.share(t)
         .then(r => { if (window.toast && r === 'shared') toast('PDF shared.'); })
         .catch(() => { if (window.toast) toast('Could not make the PDF.'); })
         .finally(() => { a.disabled = false; });
-    } else if (act === 'tab') { tab = a.dataset.tab; render(view, t.id); }
+    } else if (act === 'tab') { tab = a.dataset.tab; redraw(); }
     else if (act === 'start-ko') {
       tab = 'bracket';
       Store.commit(() => {
@@ -305,5 +347,5 @@
     Store.commit(() => sync());
   }
 
-  root.Tournament = { render };
+  root.Tournament = { render, show };
 })(window);

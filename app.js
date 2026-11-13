@@ -86,7 +86,7 @@
     $('#closeDlg').addEventListener('click', () => dlg.close());
     $('#logout').addEventListener('click', async () => {
       await Sync.flushNow();
-      if (Sync.pending() && !confirm('Some changes are not saved to the cloud yet. Log out anyway?')) return;
+      if (Sync.pending() && !confirm('Some changes are not saved to the cloud yet' + (Sync.lastError() ? ' (' + Sync.lastError() + ')' : '') + '. Log out anyway?')) return;
       dlg.close(); await Cloud.logOut(); toast('Logged out.');
     });
     bindExtras();
@@ -124,6 +124,7 @@
         <p>Pick a game, add your players, and enter each result as the matches finish. Arena builds the fixtures and tables.</p>
         <a class="cta" href="#/new">New tournament</a>
       </section>
+      ${Spectate.homeHtml()}
       <section><h2>Running now</h2>${cards(running, 'No tournaments running. Start one and it will show up here.')}</section>
       <section><h2>History</h2>${cards(done, 'Finished tournaments are kept here with their winners.')}</section>`;
   }
@@ -138,13 +139,18 @@
     if (acct.mode === 'loading') { view.innerHTML = '<p class="empty glass">Loading...</p>'; return; }
     if (acct.mode === 'out' || acct.mode === 'unverified' || acct.mode === 'noprofile') {
       if (dlg.open) dlg.close();
+      Spectate.leave();
       Auth.render(view, acct.mode === 'noprofile' ? '#/profile' : acct.mode === 'unverified' ? '#/verify' : h, { email: acct.user && acct.user.email });
       return;
     }
     if (!Store.get().profile) { openProfile(true); view.innerHTML = ''; return; }
-    if (h === '#/new') Setup.render(view);
-    else if (h.startsWith('#/t/')) Tournament.render(view, decodeURIComponent(h.slice(4)));
-    else view.innerHTML = homeView();
+    if (h.startsWith('#/watch/')) Spectate.render(view, decodeURIComponent(h.slice(8)));
+    else {
+      Spectate.leave();
+      if (h === '#/new') Setup.render(view);
+      else if (h.startsWith('#/t/')) Tournament.render(view, decodeURIComponent(h.slice(4)));
+      else { view.innerHTML = homeView(); Spectate.bindHome(view); }
+    }
     if (h !== lastHash) window.scrollTo(0, 0); // only jump to top when changing page
     lastHash = h;
   }

@@ -254,3 +254,27 @@ main input[type="email"]:focus, main input[type="password"]:focus { border-color
 .eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; display: grid; place-items: center;
   background: none; border: 0; border-radius: 8px; color: var(--mute); cursor: pointer; }
 .eye:hover { color: var(--ink); }
+
+/* ---------- Watching: code box, following, live bar ---------- */
+.codeform { padding: 16px 18px; border-radius: 12px; max-width: 520px; }
+.codeform label { display: block; font-weight: 500; }
+.codeline { display: flex; gap: 10px; margin-top: 8px; }
+main .codeline input[type="text"] { flex: 1; min-width: 0; margin-top: 0; text-transform: uppercase; letter-spacing: .15em; font-weight: 700; }
+.codeform .err { margin-top: 8px; min-height: 1.2em; }
+.watch .gh { margin-top: 26px; }
+.tcard.follow { display: flex; flex-direction: column; gap: 8px; }
+.tcard.follow a { text-decoration: none; display: block; }
+.tcard.follow .unf { align-self: flex-start; color: var(--mute); font-size: .85rem; }
+.code { font: 700 1.5rem/1 var(--display); letter-spacing: .18em; }
+.codebox { margin-top: 16px; padding: 14px 18px; border-radius: 12px; max-width: 520px; border-left: 4px solid var(--blue); }
+.codebox small { display: block; color: var(--mute); }
+.codebox .row { margin-top: 10px; }
+.codebox p { font-size: .88rem; margin-top: 10px; }
+.watchbar { display: flex; justify-content: space-between; align-items: center; gap: 10px 18px; flex-wrap: wrap; margin-top: 16px; padding: 12px 16px; border-radius: 12px; border-left: 4px solid var(--orange); }
+.watchbar .row { margin-top: 0; }
+.live { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; font-size: .85rem; padding: 3px 11px; border-radius: 99px; border: 1px solid var(--orange); margin-right: 8px; }
+.live i { width: 8px; height: 8px; border-radius: 50%; background: var(--orange); animation: pulse 1.6s ease-in-out infinite; }
+.live.done { border-color: var(--line); color: var(--mute); }
+.live.done i { animation: none; background: var(--mute); }
+@keyframes pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .live i { animation: none; } }
