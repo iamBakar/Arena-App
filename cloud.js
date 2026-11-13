@@ -1,15 +1,25 @@
 /* ==========================================================
-   cloud.js - Firebase connection: accounts + profiles.
+   cloud.js - Firebase: accounts, email verification, cloud tournaments, analytics.
    Loaded as a module; exposes window.Cloud for the other scripts.
    ========================================================== */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword,
-  signOut, sendPasswordResetEmail, deleteUser } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, doc, getDoc, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  signOut, sendPasswordResetEmail, sendEmailVerification } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, doc, getDoc, writeBatch, serverTimestamp, collection, query, where, getDocs,
+  runTransaction, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const app = initializeApp(window.FIREBASE_CONFIG);
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+/* ---------- Usage analytics (optional, fails quietly if blocked) ---------- */
+let analytics = null, logEventFn = null;
+if (window.FIREBASE_CONFIG.measurementId) {
+  import("https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics.js").then(async m => {
+    if (await m.isSupported()) { analytics = m.getAnalytics(app); logEventFn = m.logEvent; }
+  }).catch(() => {});
+}
+const track = (name, params) => { try { if (analytics) logEventFn(analytics, name, params || {}); } catch (e) {} };
 
 const MSG = {
   'auth/email-already-in-use': 'That email already has an account. Try logging in.',
@@ -21,20 +31,26 @@ const MSG = {
   'auth/too-many-requests': 'Too many tries. Wait a few minutes and try again.',
   'auth/network-request-failed': 'No internet connection. Try again when you are online.',
   'app/username-invalid': 'Username must be 3 to 20 letters, numbers or underscores.',
-  'app/username-taken': 'That username is already taken. Try another one.',
-  'app/not-signed-in': 'Please log in first.'
+  'app/username-taken': 'That username is already taken. Choose another one.',
+  'app/not-signed-in': 'Please log in first.',
+  'app/conflict': 'This tournament was changed on another device.',
+  'app/code-failed': 'Could not make a share code. Please try again.'
 };
 const friendly = e => MSG[e && e.code] || 'Something went wrong. Please try again.';
 const coded = code => Object.assign(new Error(code), { code });
-
 function validUsername(name) {
   const lower = String(name || '').trim().toLowerCase();
   if (!/^[a-z0-9_]{3,20}$/.test(lower)) throw coded('app/username-invalid');
   return lower;
 }
+const verifyUrl = () => location.origin + location.pathname;
+
+/* ---------- Pending username (chosen at sign-up, claimed once the email is verified) ---------- */
+const readPending = uid => { try { const p = JSON.parse(localStorage.getItem('arena.pending')); return p && p.uid === uid ? p : null; } catch (e) { return null; } };
+const clearPending = () => { try { localStorage.removeItem('arena.pending'); } catch (e) {} };
 
 /* ---------- Who is signed in? ---------- */
-const listeners = []; let last = { user: null, profile: null, ready: false }, signingUp = false;
+const listeners = []; let last = { user: null, profile: null, ready: false }, note = '';
 
 async function loadProfile(uid) {
   const key = 'arena.profile.' + uid;
@@ -42,18 +58,10 @@ async function loadProfile(uid) {
     const snap = await getDoc(doc(db, 'users', uid));
     if (snap.exists()) { try { localStorage.setItem(key, JSON.stringify(snap.data())); } catch (e) {} return snap.data(); }
     return null;
-  } catch (e) {                                      // offline: use the saved copy
+  } catch (e) {                                       // offline: use the saved copy
     try { return JSON.parse(localStorage.getItem(key)); } catch (e2) { return null; }
   }
 }
-async function publish(user) {
-  const profile = user ? await loadProfile(user.uid) : null;
-  last = { user: user ? { uid: user.uid, email: user.email } : null, profile, ready: true };
-  listeners.forEach(f => f(last));
-}
-onAuthStateChanged(auth, user => { if (!signingUp) publish(user); });
-
-/* ---------- Profile + username claim (both saved together or not at all) ---------- */
 async function claim(user, username, avatar) {
   const lower = validUsername(username), nameRef = doc(db, 'usernames', lower);
   if ((await getDoc(nameRef)).exists()) throw coded('app/username-taken');
@@ -62,28 +70,86 @@ async function claim(user, username, avatar) {
   batch.set(nameRef, { uid: user.uid });
   try { await batch.commit(); } catch (e) { throw coded(e.code === 'permission-denied' ? 'app/username-taken' : e.code); }
 }
+async function publish(user) {
+  const verified = !!(user && user.emailVerified);
+  let profile = null; note = '';
+  if (verified) {
+    profile = await loadProfile(user.uid);
+    if (!profile) {
+      const p = readPending(user.uid);
+      if (p) {
+        try { await claim(user, p.username, p.avatar); profile = await loadProfile(user.uid); }
+        catch (e) { note = friendly(e); }
+        clearPending();
+      }
+    }
+  }
+  last = { user: user ? { uid: user.uid, email: user.email, verified } : null, profile, ready: true };
+  listeners.forEach(f => f(last));
+}
+onAuthStateChanged(auth, user => publish(user));
 
+/* ---------- Account actions ---------- */
 async function signUp(email, password, username, avatar) {
   const lower = validUsername(username);
   if ((await getDoc(doc(db, 'usernames', lower))).exists()) throw coded('app/username-taken');
-  signingUp = true;
-  let cred;
-  try { cred = await createUserWithEmailAndPassword(auth, String(email).trim(), password); }
-  catch (e) { signingUp = false; throw e; }
-  try { await claim(cred.user, username, avatar); }
-  catch (e) { try { await deleteUser(cred.user); } catch (x) {} signingUp = false; await publish(null); throw e; }
-  signingUp = false; await publish(cred.user);
+  const cred = await createUserWithEmailAndPassword(auth, String(email).trim(), password);
+  try { localStorage.setItem('arena.pending', JSON.stringify({ uid: cred.user.uid, username: username.trim(), avatar })); } catch (e) {}
+  try { await sendEmailVerification(cred.user, { url: verifyUrl() }); } catch (e) {}
+  track('sign_up', { method: 'email' });
+}
+async function logIn(email, password) { await signInWithEmailAndPassword(auth, String(email).trim(), password); track('login', { method: 'email' }); }
+async function checkVerified() {
+  const u = auth.currentUser; if (!u) return false;
+  await u.reload();
+  if (u.emailVerified) { await u.getIdToken(true); await publish(u); }
+  return u.emailVerified;
+}
+async function resendVerification() {
+  if (!auth.currentUser) throw coded('app/not-signed-in');
+  await sendEmailVerification(auth.currentUser, { url: verifyUrl() });
 }
 async function claimProfile(username, avatar) {
   if (!auth.currentUser) throw coded('app/not-signed-in');
   await claim(auth.currentUser, username, avatar); await publish(auth.currentUser);
 }
 
+/* ---------- Tournaments in the cloud. The document id IS the share code. ---------- */
+const tref = code => doc(db, 'tournaments', code);
+const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // no 0/O/1/I to avoid mix-ups
+function makeCode() { const a = new Uint32Array(6); crypto.getRandomValues(a); return Array.from(a, x => CODE_CHARS[x % 32]).join(''); }
+async function newCode() {
+  for (let i = 0; i < 8; i++) { const c = makeCode(); if (!(await getDoc(tref(c))).exists()) return c; }
+  throw coded('app/code-failed');
+}
+function pack(t, rev) {
+  return { ownerId: auth.currentUser.uid, ownerName: (last.profile && last.profile.username) || '', name: String(t.name).slice(0, 60),
+    game: String(t.game).slice(0, 40), sport: t.sport, format: t.format, status: t.status || 'running', championName: t.championName || null,
+    createdAt: t.createdAt || Date.now(), updatedAt: serverTimestamp(), rev, data: JSON.stringify(t) };
+}
+// Saves only if nobody else changed it since we loaded it (rev must match), otherwise throws app/conflict.
+async function saveTournament(t) {
+  const ref = tref(t.id);
+  const rev = await runTransaction(db, async tx => {
+    const snap = await tx.get(ref), cur = snap.exists() ? snap.data().rev : 0;
+    if (cur !== (t.rev || 0)) throw coded('app/conflict');
+    tx.set(ref, pack(t, cur + 1));
+    return cur + 1;
+  });
+  t.rev = rev;
+}
+async function loadMine() {
+  const snap = await getDocs(query(collection(db, 'tournaments'), where('ownerId', '==', auth.currentUser.uid)));
+  return snap.docs.map(d => { const x = d.data(), t = JSON.parse(x.data); t.id = d.id; t.rev = x.rev; t.ownerId = x.ownerId; return t; });
+}
+const deleteTournament = id => deleteDoc(tref(id));
+
 window.Cloud = {
   onAuth(f) { listeners.push(f); if (last.ready) f(last); },
-  signUp, claimProfile, friendly, validUsername,
-  logIn: (email, password) => signInWithEmailAndPassword(auth, String(email).trim(), password),
+  signUp, logIn, claimProfile, checkVerified, resendVerification, friendly, validUsername, track,
+  newCode, saveTournament, loadMine, deleteTournament,
+  note: () => note,
   logOut: () => signOut(auth),
-  resetPassword: email => sendPasswordResetEmail(auth, String(email).trim())
+  resetPassword: email => sendPasswordResetEmail(auth, String(email).trim(), { url: verifyUrl() })
 };
 window.dispatchEvent(new Event('cloud-ready'));
