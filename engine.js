@@ -14,6 +14,7 @@
   function koSide(sport, m) {
     const r = m.result;
     if (!r) return null;
+    if (r.wo) return side(r.winner) ? r.winner : null;   // walkover decides the match or tie
     if (sport === 'cricket') return side(r.winner) ? r.winner : null;
     if (m.legs === 2) {
       if (!r.legs || r.legs.length < 2) return null;
@@ -29,6 +30,7 @@
   // Two-leg results are stored as { legs:[{a,b},{a,b}], decider? } - scores always from match.a vs match.b.
   function validateResult(sport, res, { stage = 'group', legs = 1 } = {}) {
     if (!res) return 'No result entered.';
+    if (res.wo) return side(res.winner) ? null : 'Pick who gets the walkover.';
     if (sport === 'cricket') {
       if (!['a', 'b', 'tie', 'nr'].includes(res.winner)) return 'Pick a winner, tie or no result.';
       if (stage === 'ko' && !side(res.winner)) return 'Knockouts need a winner (decide with a super over).';
@@ -126,8 +128,11 @@
   const groupTables = (sport, groups, rules) => groups.map(g => Core.computeStandings(sport, g.teams, g.matches, rules));
   const isStageDone = groups => groups.every(g => g.matches.every(m => m.result));
   const nextPending = matches => matches.find(m => !m.result && m.a && m.b) || null;
-  const leagueWinner = (sport, group, rules) =>
-    isStageDone([group]) ? Core.computeStandings(sport, group.teams, group.matches, rules)[0].id : null;
+  const leagueWinner = (sport, group, rules, withdrawn) => {
+    if (!isStageDone([group])) return null;
+    const row = Core.computeStandings(sport, group.teams, group.matches, rules).find(r => !(withdrawn || []).includes(r.id));
+    return row ? row.id : null;
+  };
 
   // Groups finished -> build the knockout from the chosen qualifier option.
   function startKnockoutFromGroups(sport, groups, option, koOpts, rules) {
@@ -136,6 +141,67 @@
     return Core.buildKnockout(seeds, koOpts);
   }
 
-  root.Engine = { koSide, validateResult, recompute, setKoResult, setGroupResult, groupTables, isStageDone, nextPending, leagueWinner, startKnockoutFromGroups };
+  /* ---------- Walkovers and withdrawals ---------- */
+  const WO_GOALS = { football: 3, tekken: 2 };                      // a forfeit is recorded as a 3-0 (FC) or 2-0 (Tekken) win
+  function woResult(sport, winner) {
+    if (sport === 'cricket') return { wo: true, winner };
+    const g = WO_GOALS[sport];
+    return { wo: true, winner, a: winner === 'a' ? g : 0, b: winner === 'b' ? g : 0 };
+  }
+  const koList = ko => ko.rounds.flat().concat(ko.third ? [ko.third] : []);
+
+  // Gives every unplayed match of a withdrawn player to the opponent. Safe to run again and again.
+  function applyWithdrawals(t) {
+    const wd = new Set(t.withdrawn || []); if (!wd.size) return;
+    if (t.stage !== 'knockout') {
+      t.groups.forEach(g => g.matches.forEach(m => {
+        if (m.result) return;
+        const aw = wd.has(m.a), bw = wd.has(m.b); if (!aw && !bw) return;
+        m.result = Object.assign(woResult(t.sport, aw && !bw ? 'b' : 'a'), { auto: true });
+      }));
+    }
+    if (t.ko) {
+      let changed = true, guard = 0;
+      while (changed && guard++ < 30) {
+        changed = false;
+        for (const m of koList(t.ko)) {
+          if (m.bye || m.winner || !m.a || !m.b) continue;          // opponent not known yet: handled on a later run
+          const aw = wd.has(m.a), bw = wd.has(m.b); if (!aw && !bw) continue;
+          const r = setKoResult(t.ko, t.sport, m.id, Object.assign(woResult(t.sport, aw && !bw ? 'b' : 'a'), { auto: true }), true);
+          if (r.ok) changed = true;
+        }
+      }
+    }
+  }
+  function withdrawPlayer(t, id) {
+    t.withdrawn = t.withdrawn || [];
+    if (!t.withdrawn.includes(id)) t.withdrawn.push(id);
+    applyWithdrawals(t);
+  }
+  // Undo a withdrawal: removes the walkovers that were given automatically because of it.
+  function reinstatePlayer(t, id) {
+    t.withdrawn = (t.withdrawn || []).filter(x => x !== id);
+    if (t.stage !== 'knockout') t.groups.forEach(g => g.matches.forEach(m => { if (m.result && m.result.auto && (m.a === id || m.b === id)) m.result = null; }));
+    if (t.ko) {
+      koList(t.ko).filter(m => m.result && m.result.auto && (m.a === id || m.b === id)).map(m => m.id).forEach(mid => {
+        const m = koList(t.ko).find(x => x.id === mid);
+        if (m && m.result && m.result.auto) setKoResult(t.ko, t.sport, mid, null, true);
+      });
+    }
+  }
+  // Group/league qualifiers, leaving out anyone who withdrew.
+  function qualifierSeeds(t) {
+    const wd = new Set(t.withdrawn || []), rules = { points: t.settings.points, maxOvers: t.settings.maxOvers };
+    const tables = groupTables(t.sport, t.groups, rules).map(tb => tb.filter(r => !wd.has(r.id)));
+    return Core.pickQualifiers(t.sport, tables, t.settings.qualifier);
+  }
+  function startKnockout(t) {
+    if (!isStageDone(t.groups)) throw new Error('Finish all group matches first.');
+    const seeds = qualifierSeeds(t);
+    if (seeds.length < 2) throw new Error('Not enough players are left to start the knockout.');
+    return Core.buildKnockout(seeds, t.settings.koOpts);
+  }
+
+  root.Engine = { woResult, applyWithdrawals, withdrawPlayer, reinstatePlayer, qualifierSeeds, startKnockout, koSide, validateResult, recompute, setKoResult, setGroupResult, groupTables, isStageDone, nextPending, leagueWinner, startKnockoutFromGroups };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Engine;
 })(typeof window !== 'undefined' ? window : globalThis);
