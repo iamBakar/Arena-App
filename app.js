@@ -74,8 +74,19 @@
 
   const timeBlock = () => { const tf = Store.get().settings.timeFormat || '24h'; return `<hr><h3>Time format</h3><p class="mute">How match times are shown on this device.</p>
     <div class="row"><button type="button" class="btn sm ${tf === '24h' ? 'on' : ''}" data-tf="24h">24-hour</button><button type="button" class="btn sm ${tf === '12h' ? 'on' : ''}" data-tf="12h">12-hour</button></div>`; };
-  const extrasHtml = () => timeBlock() + installBlock();
+  const diagBlock = () => `<hr><h3>Cloud connection</h3><p class="mute">If a tournament says "Not saved", run this check to see exactly what the cloud is refusing.</p>
+    <div class="row"><button type="button" class="btn sm" id="diag">Check cloud connection</button></div>`;
+  const extrasHtml = () => timeBlock() + (acct.mode === 'in' ? diagBlock() : '') + installBlock();
+  async function runDiag() {
+    dlg.innerHTML = '<h2>Checking...</h2><p class="mute">This takes a few seconds.</p>';
+    let res;
+    try { res = await Cloud.diagnose(Store.get().tournaments); } catch (e) { res = [{ ok: false, label: 'The check itself failed', detail: String((e && e.code) || e) }]; }
+    dlg.innerHTML = `<h2>Cloud connection</h2><ul class="diag">${res.map(r => `<li class="${r.ok ? 'ok' : 'bad'}"><b>${r.ok ? '&#10003;' : '&#10007;'} ${esc(r.label)}</b><span>${esc(r.detail || '')}</span></li>`).join('')}</ul>
+      <p class="mute small">If any line has a cross, send a screenshot of this box.</p><div class="row"><button type="button" class="btn" id="closeDlg">Close</button></div>`;
+    $('#closeDlg').addEventListener('click', () => dlg.close());
+  }
   function bindExtras() {
+    const dg = $('#diag'); if (dg) dg.addEventListener('click', runDiag);
     document.querySelectorAll('[data-tf]').forEach(b => b.addEventListener('click', () => {
       Store.commit(s => { s.settings.timeFormat = b.dataset.tf; });
       if ($('#logout')) openAccount(); else openProfile(false);
@@ -210,6 +221,13 @@
   const startCloud = () => Cloud.onAuth(onCloud);
   if (window.Cloud) startCloud(); else window.addEventListener('cloud-ready', startCloud, { once: true });
   setTimeout(() => { if (acct.mode === 'loading') { acct = { mode: 'local', user: null, profile: null }; refresh(); route(); } }, 6000);   // could not reach Firebase: keep working locally
+
+  // If an upload was only partly picked up (old and new files mixed), say which file is stale instead of failing quietly
+  const NEED = { 'core.js': ['Core', 'pickQualifiers'], 'engine.js': ['Engine', 'qualifierSeeds', 'applyWithdrawals', 'woResult', 'startKnockout'], 'schedule.js': ['Schedule', 'compute'],
+    'tournament.js': ['Tournament', 'render'], 'sync.js': ['Sync', 'retry', 'onStatus'], 'watch.js': ['Watch', 'render'], 'auth.js': ['Auth', 'render'],
+    'exporter.js': ['Exporter', 'offerFile'], 'setup.js': ['Setup', 'render'], 'store.js': ['Store', 'commit'] };
+  const stale = Object.keys(NEED).filter(f => { const [g, ...fns] = NEED[f]; return !window[g] || fns.some(n => typeof window[g][n] !== 'function'); });
+  if (stale.length) { const b = $('#stale'); b.hidden = false; b.textContent = 'Some app files are old or missing: ' + stale.join(', ') + '. Reload with Ctrl+Shift+R. On a phone, close the app and open it again, or clear this site\'s data in the browser settings.'; }
 
   refresh(); route();
   if (!Store.isPersistent()) toast('This browser blocks saving. Export a backup before closing.');

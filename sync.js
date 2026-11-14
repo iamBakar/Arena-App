@@ -1,20 +1,22 @@
 /* ==========================================================
    sync.js - keeps this device's tournaments and the cloud in step.
    Store.tournaments is a local copy of the signed-in person's tournaments.
-   Shows its status (Saving / Saved / Not saved / Offline) and always says WHY a save failed.
+   Shows its status (Saving / Saved / Not saved / Offline) and always says WHAT failed and WHY.
+   One problem tournament never blocks the others.
    ========================================================== */
 (function (root) {
   'use strict';
+  const CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
   const sigOf = t => JSON.stringify(t, (k, v) => (k === 'rev' ? undefined : v));   // rev is bookkeeping, not content
   let uid = null, ready = false, busy = false, again = false, synced = {}, status = { state: 'idle', msg: '' };
   const subs = [];
   const say = m => { if (root.toast) root.toast(m); };
   const setStatus = (state, msg) => { status = { state, msg: msg || '' }; subs.forEach(f => f(status)); };
   const offlineLike = e => (typeof navigator !== 'undefined' && navigator.onLine === false) || (e && (e.code === 'unavailable' || e.code === 'auth/network-request-failed'));
-  function fail(e) {
-    console.error('[Arena sync]', e);
+  function fail(e, what) {
+    console.error('[Arena sync]', what || '', e);
     if (offlineLike(e)) setStatus('offline', 'No internet connection. Your changes are kept on this device and will be saved when you are back online.');
-    else setStatus('error', Cloud.friendly(e) + (e && e.code ? ' (' + e.code + ')' : ''));
+    else setStatus('error', (what ? what + ': ' : '') + Cloud.friendly(e) + (e && e.code ? ' (' + e.code + ')' : '') + '. Open your profile menu and run "Check cloud connection" to see why.');
   }
 
   async function start(u, force) {
@@ -22,7 +24,7 @@
     uid = u; ready = false; synced = {};
     const s = Store.get();
     let mine;
-    try { mine = await Cloud.loadMine(); } catch (e) { fail(e); return; }     // not ready: nothing is lost, retry() or going online tries again
+    try { mine = await Cloud.loadMine(); } catch (e) { fail(e, 'Could not load your tournaments'); return; }   // nothing is lost; retry() or going online tries again
     const cache = force ? [] : (s.cacheUid === u ? s.tournaments : s.tournaments.filter(t => t.ownerId === u));
     const legacy = s.cacheUid ? [] : s.tournaments.filter(t => !t.ownerId);   // made before accounts existed
     const map = {}; synced = {};
@@ -49,16 +51,24 @@
       const dirty = list.filter(t => synced[t.id] !== sigOf(t)), gone = Object.keys(synced).filter(id => !list.some(x => x.id === id));
       if (!dirty.length && !gone.length) return;
       setStatus('saving');
+      let firstErr = null, what = '';
       for (const t of dirty) {
-        try { await Cloud.saveTournament(t); synced[t.id] = sigOf(t); saved = true; }
-        catch (e) {
+        try {
+          if (!CODE_RE.test(t.id)) {                                           // an id that is not a share code can never be saved: give it one
+            const old = t.id; t.id = await Cloud.newCode(); delete t.rev;
+            if (location.hash === '#/t/' + old) location.replace('#/t/' + t.id);
+          }
+          if (t.ownerId !== uid) t.ownerId = uid;
+          await Cloud.saveTournament(t); synced[t.id] = sigOf(t); saved = true;
+        } catch (e) {
           if (e && e.code === 'app/conflict') { say('Updated from another device.'); busy = false; return start(uid, true); }
-          fail(e); return;
+          if (!firstErr) { firstErr = e; what = 'Could not save "' + t.name + '"'; }   // keep going: one bad tournament must not block the rest
         }
       }
       for (const id of gone) {
-        try { await Cloud.deleteTournament(id); delete synced[id]; } catch (e) { fail(e); return; }
+        try { await Cloud.deleteTournament(id); delete synced[id]; } catch (e) { if (!firstErr) { firstErr = e; what = 'Could not delete a tournament'; } }
       }
+      if (firstErr) { fail(firstErr, what); return; }
       setStatus('saved');
     } finally {
       busy = false;

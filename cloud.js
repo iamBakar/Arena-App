@@ -145,7 +145,7 @@ async function saveOnce(t) {
 }
 async function loadOnce() {
   const snap = await getDocs(query(collection(db, 'tournaments'), where('ownerId', '==', auth.currentUser.uid)));
-  return snap.docs.map(d => { const x = d.data(), t = JSON.parse(x.data); t.id = d.id; t.rev = x.rev; t.ownerId = x.ownerId; return t; });
+  return snap.docs.filter(d => d.data().name !== '__diagnostic__').map(d => { const x = d.data(), t = JSON.parse(x.data); t.id = d.id; t.rev = x.rev; t.ownerId = x.ownerId; return t; });
 }
 const deleteTournament = id => deleteDoc(tref(id));
 
@@ -182,7 +182,44 @@ function onFollowing(cb) {
     s => cb(s.docs.map(d => d.data()).sort((a, b) => b.followedAt - a.followedAt)), () => cb([]));
 }
 
+/* ---------- Connection check: shows exactly which cloud step is refused ---------- */
+const CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
+function ruleProblems(t) {
+  const p = [];
+  if (!CODE_RE.test(t.id)) p.push('its id "' + t.id + '" is not a valid share code');
+  if (!['football', 'cricket', 'tekken'].includes(t.sport)) p.push('unknown game type "' + t.sport + '"');
+  if (!['league', 'knockout', 'groups'].includes(t.format)) p.push('unknown format "' + t.format + '"');
+  if (JSON.stringify(t).length > 900000) p.push('too large for the cloud');
+  if (t.ownerId && last.user && t.ownerId !== last.user.uid) p.push('it belongs to a different account');
+  return p;
+}
+async function diagnose(list) {
+  const out = [], ok = (label, detail) => out.push({ ok: true, label, detail }), bad = (label, detail) => out.push({ ok: false, label, detail });
+  const u = auth.currentUser;
+  if (!u) { bad('Signed in', 'You are not signed in.'); return out; }
+  ok('Signed in', u.email);
+  try { await u.reload(); const r = await u.getIdTokenResult(true);
+    if (r.claims.email_verified) ok('Email verified', 'yes'); else bad('Email verified', 'Your login says NOT verified. Log out, log in again, then run this check again.'); }
+  catch (e) { bad('Login token', e.code || String(e)); }
+  try { const s = await getDoc(doc(db, 'users', u.uid)); if (s.exists()) ok('Profile in the cloud', s.data().username); else bad('Profile in the cloud', 'No profile found.'); }
+  catch (e) { bad('Profile in the cloud', (e.code || String(e)) + ' (while reading your profile)'); }
+  try { const s = await getDocs(query(collection(db, 'tournaments'), where('ownerId', '==', u.uid))); ok('Read your tournaments', s.size + ' in the cloud'); }
+  catch (e) { bad('Read your tournaments', e.code || String(e)); }
+  try {                                                   // a real write test with a throwaway tournament, removed straight away
+    const ref = tref(await newCode());
+    await setDoc(ref, { ownerId: u.uid, ownerName: (last.profile && last.profile.username) || '', name: '__diagnostic__', game: 'test', sport: 'football', format: 'league',
+      status: 'running', championName: null, createdAt: Date.now(), updatedAt: serverTimestamp(), rev: 1, data: '{}' });
+    await deleteDoc(ref); ok('Write test', 'saved and removed a test tournament');
+  } catch (e) { bad('Write test', (e.code || String(e)) + ' while creating a tournament. The cloud rules or your account are blocking saves.'); }
+  (list || []).forEach(t => {
+    const probs = ruleProblems(t), kb = Math.round(JSON.stringify(t).length / 1024);
+    if (probs.length) bad('Tournament "' + t.name + '"', probs.join('; ')); else ok('Tournament "' + t.name + '"', 'code ' + t.id + ', ' + kb + ' KB, looks valid');
+  });
+  return out;
+}
+
 window.Cloud = {
+  diagnose,
   onAuth(f) { listeners.push(f); if (last.ready) f(last); },
   signUp, logIn, claimProfile, checkVerified, resendVerification, friendly, validUsername, track,
   newCode, saveTournament, loadMine, deleteTournament, watchTournament, follow, unfollow, onFollowing,
