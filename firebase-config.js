@@ -8,5 +8,7 @@ window.FIREBASE_CONFIG = {
   storageBucket: "arena-tournament-manager.firebasestorage.app",
   messagingSenderId: "838210805866",
   appId: "1:838210805866:web:3ee60b79b211d3c5132a13",
-  measurementId: "G-60ZF6JX6LW"
+  measurementId: "G-60ZF6JX6LW",
+  // Public reCAPTCHA Enterprise site key for App Check. Safe to be public. Remove this line to switch App Check off.
+  appCheckSiteKey: "6Lc1iSAuAAAAACQRn-lB3wSEU5fg35Fhr_cQco1f"
 };

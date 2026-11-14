@@ -5,10 +5,18 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword,
   signOut, sendPasswordResetEmail, sendEmailVerification } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js";
 import { getFirestore, doc, getDoc, writeBatch, serverTimestamp, collection, query, where, getDocs,
   runTransaction, deleteDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const app = initializeApp(window.FIREBASE_CONFIG);
+
+/* ---------- App Check: proves to Firebase that requests come from this real website (invisible to users) ----------
+   Must run before any other Firebase service is used. A problem here never stops the app from loading. */
+if (window.FIREBASE_CONFIG.appCheckSiteKey) {
+  try { initializeAppCheck(app, { provider: new ReCaptchaEnterpriseProvider(window.FIREBASE_CONFIG.appCheckSiteKey), isTokenAutoRefreshEnabled: true }); }
+  catch (e) { console.error('[Arena] App Check could not start', e); }
+}
 const auth = getAuth(app);
 const db = getFirestore(app);
 
