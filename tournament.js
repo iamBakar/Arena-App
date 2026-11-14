@@ -224,7 +224,7 @@
         .then(r => { if (window.toast && r === 'shared') toast('PDF shared.'); })
         .catch(() => { if (window.toast) toast('Could not make the PDF.'); })
         .finally(() => { a.disabled = false; });
-    } else if (act === 'tab') { tab = a.dataset.tab; render(view, t.id); }
+    } else if (act === 'tab') { tab = a.dataset.tab; render(view, t.id, ro ? t : undefined, meta); }   // keep viewer mode when switching tabs
     else if (act === 'start-ko') {
       tab = 'bracket';
       Store.commit(() => {
