@@ -1,7 +1,7 @@
 /* Service worker: lets the app open offline once it has been loaded.
    Change VERSION whenever you upload new files so phones pick up the update. */
-const VERSION = 'arena-v8';
-const FILES = ['./', 'index.html', 'style.css', 'core.js', 'engine.js', 'store.js', 'setup.js', 'exporter.js', 'firebase-config.js', 'cloud.js', 'auth.js', 'sync.js', 'watch.js', 'tournament.js', 'app.js',
+const VERSION = 'arena-v9';
+const FILES = ['./', 'index.html', 'style.css', 'core.js', 'engine.js', 'store.js', 'setup.js', 'schedule.js', 'exporter.js', 'firebase-config.js', 'cloud.js', 'auth.js', 'sync.js', 'watch.js', 'tournament.js', 'app.js',
   'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {

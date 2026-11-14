@@ -72,8 +72,14 @@
   $('#profileBtn').addEventListener('click', () => (acct.mode === 'in' ? openAccount() : openProfile(!Store.get().profile)));
   dlg.addEventListener('cancel', e => { if (!Store.get().profile) e.preventDefault(); }); // profile is required first
 
-  const extrasHtml = () => installBlock();
+  const timeBlock = () => { const tf = Store.get().settings.timeFormat || '24h'; return `<hr><h3>Time format</h3><p class="mute">How match times are shown on this device.</p>
+    <div class="row"><button type="button" class="btn sm ${tf === '24h' ? 'on' : ''}" data-tf="24h">24-hour</button><button type="button" class="btn sm ${tf === '12h' ? 'on' : ''}" data-tf="12h">12-hour</button></div>`; };
+  const extrasHtml = () => timeBlock() + installBlock();
   function bindExtras() {
+    document.querySelectorAll('[data-tf]').forEach(b => b.addEventListener('click', () => {
+      Store.commit(s => { s.settings.timeFormat = b.dataset.tf; });
+      if ($('#logout')) openAccount(); else openProfile(false);
+    }));
     const inst = $('#inst');
     if (inst) inst.addEventListener('click', () => { installPrompt.prompt(); installPrompt = null; dlg.close(); });
   }

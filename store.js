@@ -5,7 +5,7 @@
 (function (root) {
   'use strict';
   const KEY = 'arena.v1';
-  const fresh = () => ({ v: 1, profile: null, settings: { theme: 'auto' }, tournaments: [] });
+  const fresh = () => ({ v: 1, profile: null, settings: { theme: 'auto', timeFormat: '24h' }, tournaments: [] });
   let state = fresh(), persistent = true;
   const listeners = [];
 

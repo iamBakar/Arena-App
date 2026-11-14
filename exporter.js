@@ -69,6 +69,8 @@
     const rules = { points: t.settings.points, maxOvers: t.settings.maxOvers };
     const tb = Core.SPORTS[S].koTiebreak || 'decider game';
     const fmtName = { league: 'League', knockout: 'Knockout', groups: 'Groups + knockout' }[t.format];
+    const wdSet = new Set(t.withdrawn || []);
+    const sch = root.Schedule && t.schedule ? root.Schedule.compute(t) : null;
     let y = 0, usedStar = false;
 
     function newPage(first) {
@@ -95,7 +97,7 @@
     function standings() {
       const tables = Engine.groupTables(S, t.groups, rules), q = t.settings.qualifier;
       let hot = new Set();
-      if (q) hot = new Set(Core.pickQualifiers(S, tables, q));
+      if (q) hot = new Set(Engine.qualifierSeeds(t));
       else if (t.format === 'league' && tables[0][0] && tables[0][0].p) hot = new Set([tables[0][0].id]);
       const cols = S === 'football' ? [['P', 'p'], ['W', 'w'], ['D', 'd'], ['L', 'l'], ['GF', 'gf'], ['GA', 'ga'], ['GD', 'gd'], ['Pts', 'pts']]
         : S === 'cricket' ? [['P', 'p'], ['W', 'w'], ['L', 'l'], ['T/NR', 'd'], ['Pts', 'pts'], ['NRR', 'nrr']]
@@ -114,7 +116,7 @@
           if (i % 2 === 0) d.rect(M, y, W - 2 * M, 17, ROW);
           if (hot.has(r.id)) d.rect(M, y, 3, 17, ORANGE);
           d.text(String(r.pos), M + 15, y + 12, 9, { color: MUTE, align: 'center' });
-          d.text(fit(nm(r.id), nameW - 8, 10, true), M + 34, y + 12, 10, { bold: true });
+          d.text(fit(nm(r.id) + (wdSet.has(r.id) ? ' (withdrew)' : ''), nameW - 8, 10, true), M + 34, y + 12, 10, { bold: true });
           cols.forEach((c, j) => d.text(val(c[1], r[c[1]]), M + 30 + nameW + statW * (j + 1) - 6, y + 12, 10, { bold: c[1] === 'pts', align: 'right' }));
           y += 17;
         });
@@ -128,6 +130,7 @@
     /* matches */
     function resText(m) {
       const r = m.result; if (!r) return 'vs';
+      if (r.wo) return 'Walkover';
       if (S === 'cricket') return r.winner === 'nr' ? 'No result' : r.winner === 'tie' ? r.a.runs + ' v ' + r.b.runs + ', tie' : r.a.runs + ' v ' + r.b.runs;
       let s = r.legs ? r.legs.map(l => l.a + '-' + l.b).join(', ') : r.a + ' - ' + r.b;
       if (r.legs && r.legs.length === 2) s += ' (agg ' + (r.legs[0].a + r.legs[1].a) + '-' + (r.legs[0].b + r.legs[1].b) + ')';
@@ -139,7 +142,9 @@
       if (m.bye) { d.text(nm(m.winner) + ' advances (bye)', c, y + 12, 9, { align: 'center', color: MUTE }); y += 17; return; }
       const won = m.winner || (m.result && S !== 'cricket' ? (m.result.a > m.result.b ? m.a : m.result.b > m.result.a ? m.b : null) : null) ||
         (m.result && S === 'cricket' ? (m.result.winner === 'a' ? m.a : m.result.winner === 'b' ? m.b : null) : null);
-      d.text(fit(nm(m.a), 135, 10, won === m.a), c - 80, y + 12, 10, { align: 'right', bold: won === m.a });
+      const sl = sch && sch.slots[m.id];
+      if (sl) d.text(root.Schedule.label(sl), M + 4, y + 12, 8, { color: MUTE });
+      d.text(fit(nm(m.a), sl ? 100 : 135, 10, won === m.a), c - 80, y + 12, 10, { align: 'right', bold: won === m.a });
       let mid = resText(m); if (m.result && m.result.decider) { mid += '*'; usedStar = true; }
       d.text(fit(mid, 150, 9, true), c, y + 12, 9, { align: 'center', bold: !!m.result, color: m.result ? INK : MUTE });
       d.text(fit(nm(m.b), 135, 10, won === m.b), c + 80, y + 12, 10, { bold: won === m.b });
