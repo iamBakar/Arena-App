@@ -1,32 +1,41 @@
 /* ==========================================================
    sync.js - keeps this device's tournaments and the cloud in step.
    Store.tournaments is a local copy of the signed-in person's tournaments.
+   Shows its status (Saving / Saved / Not saved / Offline) and always says WHY a save failed.
    ========================================================== */
 (function (root) {
   'use strict';
   const sigOf = t => JSON.stringify(t, (k, v) => (k === 'rev' ? undefined : v));   // rev is bookkeeping, not content
-  let uid = null, ready = false, busy = false, again = false, synced = {};
+  let uid = null, ready = false, busy = false, again = false, synced = {}, status = { state: 'idle', msg: '' };
+  const subs = [];
   const say = m => { if (root.toast) root.toast(m); };
+  const setStatus = (state, msg) => { status = { state, msg: msg || '' }; subs.forEach(f => f(status)); };
+  const offlineLike = e => (typeof navigator !== 'undefined' && navigator.onLine === false) || (e && (e.code === 'unavailable' || e.code === 'auth/network-request-failed'));
+  function fail(e) {
+    console.error('[Arena sync]', e);
+    if (offlineLike(e)) setStatus('offline', 'No internet connection. Your changes are kept on this device and will be saved when you are back online.');
+    else setStatus('error', Cloud.friendly(e) + (e && e.code ? ' (' + e.code + ')' : ''));
+  }
 
   async function start(u, force) {
     if (!force && uid === u) return;
     uid = u; ready = false; synced = {};
     const s = Store.get();
     let mine;
-    try { mine = await Cloud.loadMine(); } catch (e) { return; }          // offline: keep the saved copy, retry when online
+    try { mine = await Cloud.loadMine(); } catch (e) { fail(e); return; }     // not ready: nothing is lost, retry() or going online tries again
     const cache = force ? [] : (s.cacheUid === u ? s.tournaments : s.tournaments.filter(t => t.ownerId === u));
     const legacy = s.cacheUid ? [] : s.tournaments.filter(t => !t.ownerId);   // made before accounts existed
     const map = {}; synced = {};
     mine.forEach(c => {
       const l = cache.find(x => x.id === c.id);
-      if (l && l.rev === c.rev && sigOf(l) !== sigOf(c)) map[c.id] = l;     // unsaved edits made on this device
+      if (l && l.rev === c.rev && sigOf(l) !== sigOf(c)) map[c.id] = l;       // unsaved edits made on this device
       else { map[c.id] = c; synced[c.id] = sigOf(c); }
     });
-    cache.filter(l => !l.rev && !map[l.id]).forEach(l => (map[l.id] = l));  // new, not yet saved
+    cache.filter(l => !l.rev && !map[l.id]).forEach(l => (map[l.id] = l));    // new, not yet saved
     for (const l of legacy) { l.id = await Cloud.newCode(); l.ownerId = u; delete l.rev; map[l.id] = l; }
     const list = Object.values(map).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     Store.commit(st => { st.tournaments = list; st.cacheUid = u; });
-    ready = true;
+    ready = true; setStatus('saved');
     if (legacy.length) say('Moved ' + legacy.length + ' tournament(s) from this device to your account.');
     flush();
   }
@@ -37,25 +46,34 @@
     busy = true; let saved = false;
     try {
       const list = Store.get().tournaments.slice();
-      for (const t of list) {
-        if (synced[t.id] === sigOf(t)) continue;
+      const dirty = list.filter(t => synced[t.id] !== sigOf(t)), gone = Object.keys(synced).filter(id => !list.some(x => x.id === id));
+      if (!dirty.length && !gone.length) return;
+      setStatus('saving');
+      for (const t of dirty) {
         try { await Cloud.saveTournament(t); synced[t.id] = sigOf(t); saved = true; }
         catch (e) {
           if (e && e.code === 'app/conflict') { say('Updated from another device.'); busy = false; return start(uid, true); }
-          return;                                                          // offline or other error: try again on the next change
+          fail(e); return;
         }
       }
-      for (const id of Object.keys(synced)) {
-        if (!list.some(x => x.id === id)) { try { await Cloud.deleteTournament(id); delete synced[id]; } catch (e) {} }
+      for (const id of gone) {
+        try { await Cloud.deleteTournament(id); delete synced[id]; } catch (e) { fail(e); return; }
       }
+      setStatus('saved');
     } finally {
       busy = false;
-      if (saved) Store.commit(() => {});                                   // store the new revision numbers locally
+      if (saved) Store.commit(() => {});                                     // store the new revision numbers locally
       if (again) { again = false; flush(); }
     }
   }
 
-  function stop() { uid = null; ready = false; synced = {}; Store.commit(st => { st.tournaments = []; st.cacheUid = null; }); }
+  // Try again without discarding anything made on this device.
+  function retry() {
+    if (!uid) return;
+    if (!ready) { const u = uid; uid = null; return start(u, false); }
+    return flush();
+  }
+  function stop() { uid = null; ready = false; synced = {}; setStatus('idle'); Store.commit(st => { st.tournaments = []; st.cacheUid = null; }); }
   function pending() {
     if (!uid) return 0;
     const list = Store.get().tournaments;
@@ -63,6 +81,12 @@
   }
 
   Store.subscribe(flush);
-  window.addEventListener('online', () => { if (uid && !ready) start(uid, false); else flush(); });
-  root.Sync = { start, flush, flushNow: async () => { await flush(); while (busy) await new Promise(r => setTimeout(r, 100)); }, stop, pending, active: () => !!uid, uid: () => uid };
+  window.addEventListener('online', retry);
+  window.addEventListener('focus', () => { if (status.state === 'error' || status.state === 'offline') retry(); });
+  setInterval(() => { if (uid && (status.state === 'error' || status.state === 'offline')) retry(); }, 30000);
+  root.Sync = {
+    start, flush, retry, stop, pending, active: () => !!uid, uid: () => uid,
+    flushNow: async () => { await flush(); while (busy) await new Promise(r => setTimeout(r, 100)); },
+    status: () => status, onStatus: f => subs.push(f)
+  };
 })(window);

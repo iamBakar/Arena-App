@@ -10,6 +10,7 @@
   const FORMATS = { league: 'League', knockout: 'Knockout', groups: 'Groups + knockout' };
   const dark = matchMedia('(prefers-color-scheme: dark)');
   const dlg = $('#dlg'), view = $('#view');
+  let following = [], unFollow = null;
   let acct = { mode: 'loading', user: null, profile: null };   // loading | local | out | unverified | noprofile | in
 
   /* ---------- Toast ---------- */
@@ -124,8 +125,26 @@
         <p>Pick a game, add your players, and enter each result as the matches finish. Arena builds the fixtures and tables.</p>
         <a class="cta" href="#/new">New tournament</a>
       </section>
+      ${acct.mode === 'in' ? joinBox() : ''}
       <section><h2>Running now</h2>${cards(running, 'No tournaments running. Start one and it will show up here.')}</section>
-      <section><h2>History</h2>${cards(done, 'Finished tournaments are kept here with their winners.')}</section>`;
+      <section><h2>History</h2>${cards(done, 'Finished tournaments are kept here with their winners.')}</section>
+      ${acct.mode === 'in' ? followSection() : ''}`;
+  }
+  const joinBox = () => `<section class="panel glass join"><h2>Watch a tournament</h2>
+    <p class="mute">Got a code from a host? Enter it to follow the fixtures and tables live. You can only view, not change anything.</p>
+    <form id="joinForm" class="joinrow"><input type="text" name="code" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="K7M2QX" aria-label="Tournament code">
+    <button class="btn primary">Watch</button></form><p id="joinErr" class="err" role="alert"></p></section>`;
+  const followSection = () => `<section><h2>Following</h2>${following.length ? `<div class="grid">${following.map(f =>
+    `<a class="tcard glass" href="#/v/${esc(f.code)}"><h3>${esc(f.name)}</h3><p>${esc(f.game)}, hosted by ${esc(f.ownerName || 'a host')}</p><p>Code ${esc(f.code)}</p></a>`).join('')}</div>`
+    : '<p class="empty glass">Tournaments you open with a code are saved here, so you never need to enter the code again.</p>'}</section>`;
+  function bindHome() {
+    const f = $('#joinForm'); if (!f) return;
+    f.addEventListener('submit', ev => {
+      ev.preventDefault();
+      const code = f.elements.code.value.trim().toUpperCase();
+      if (!/^[A-HJ-NP-Z2-9]{6}$/.test(code)) { $('#joinErr').textContent = 'A code has 6 letters and numbers, like K7M2QX.'; return; }
+      location.hash = '#/v/' + code;
+    });
   }
 
   function placeholderView(title, text) {
@@ -141,10 +160,15 @@
       Auth.render(view, acct.mode === 'noprofile' ? '#/profile' : acct.mode === 'unverified' ? '#/verify' : h, { email: acct.user && acct.user.email });
       return;
     }
+    if (!h.startsWith('#/v/')) Watch.stop();
     if (!Store.get().profile) { openProfile(true); view.innerHTML = ''; return; }
     if (h === '#/new') Setup.render(view);
     else if (h.startsWith('#/t/')) Tournament.render(view, decodeURIComponent(h.slice(4)));
-    else view.innerHTML = homeView();
+    else if (h.startsWith('#/v/')) {
+      if (acct.mode === 'in') Watch.render(view, decodeURIComponent(h.slice(4)));
+      else view.innerHTML = placeholderView('Watch a tournament', 'Log in with an online account to watch tournaments with a code.');
+    }
+    else { view.innerHTML = homeView(); bindHome(); }
     if (h !== lastHash) window.scrollTo(0, 0); // only jump to top when changing page
     lastHash = h;
   }
@@ -154,7 +178,7 @@
   Store.subscribe(() => { refresh(); if (dlg.open === false) route(); else if (Store.get().profile) route(); });
   window.addEventListener('hashchange', route);
   function onCloud(s) {
-    if (!s.user) { acct = { mode: 'out', user: null, profile: null }; Sync.stop(); }
+    if (!s.user) { acct = { mode: 'out', user: null, profile: null }; Sync.stop(); Watch.stop(); if (unFollow) { unFollow(); unFollow = null; } following = []; }
     else if (!s.user.verified) acct = { mode: 'unverified', user: s.user, profile: null };
     else if (!s.profile) acct = { mode: 'noprofile', user: s.user, profile: null };
     else {
@@ -163,10 +187,20 @@
       if (!cur || cur.uid !== s.user.uid || cur.name !== s.profile.username || cur.avatar !== s.profile.avatar)
         Store.commit(st => { st.profile = { name: s.profile.username, avatar: s.profile.avatar, uid: s.user.uid }; });
       Sync.start(s.user.uid);
+      if (!unFollow && window.Cloud && Cloud.onFollowing) unFollow = Cloud.onFollowing(list => { following = list; Watch.setFollowing(list); route(); });
     }
     refresh(); route();
   }
   window.addEventListener('focus', () => { if (acct.mode === 'unverified' && window.Cloud) Cloud.checkVerified().catch(() => {}); });
+  // Save status badge: tells you if the cloud copy is up to date, and why not if it is not
+  const pill = $('#syncPill'); let pillTimer;
+  Sync.onStatus(s => {
+    clearTimeout(pillTimer);
+    pill.hidden = s.state === 'idle'; pill.dataset.state = s.state; pill.title = s.msg;
+    pill.textContent = { saving: 'Saving...', saved: 'Saved', error: 'Not saved', offline: 'Offline', idle: '' }[s.state];
+    if (s.state === 'saved') pillTimer = setTimeout(() => { pill.hidden = true; }, 2500);
+  });
+  pill.addEventListener('click', () => { const s = Sync.status(); if (s.state === 'error' || s.state === 'offline') { toast(s.msg); Sync.retry(); } });
   const startCloud = () => Cloud.onAuth(onCloud);
   if (window.Cloud) startCloud(); else window.addEventListener('cloud-ready', startCloud, { once: true });
   setTimeout(() => { if (acct.mode === 'loading') { acct = { mode: 'local', user: null, profile: null }; refresh(); route(); } }, 6000);   // could not reach Firebase: keep working locally

@@ -6,7 +6,7 @@
   const $ = s => document.querySelector(s);
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const dlg = $('#dlg');
-  let t = null, view = null, opened = {}, tab = 'fixtures', curId = null;
+  let t = null, view = null, opened = {}, tab = 'fixtures', curId = null, ro = false, meta = {};
 
   const nm = id => { const p = t.players.find(x => x.id === id); return p ? p.name : 'To be decided'; };
   const e = id => esc(nm(id));
@@ -51,7 +51,7 @@
     const done = isDone(m), ready = m.a && m.b;
     const mid = m.result ? `<b class="score">${resText(m)}</b>` : '<span class="vs">vs</span>';
     const label = done ? 'Edit' : (m.result ? 'Enter leg 2' : 'Enter result');
-    const btn = (ready && !locked) ? `<button class="btn sm" data-act="enter" data-id="${m.id}">${label}</button>` : '<span></span>';
+    const btn = (ready && !locked && !ro) ? `<button class="btn sm" data-act="enter" data-id="${m.id}">${label}</button>` : '<span></span>';
     return `<div class="mrow ${done ? 'played' : ''}"><span class="tm a">${e(m.a)}</span>${mid}<span class="tm b">${e(m.b)}</span>${btn}</div>`;
   }
 
@@ -87,6 +87,7 @@
   }
 
   function stagePanel() {
+    if (ro) return '';
     const q = t.settings.qualifier;
     if (t.stage === 'knockout' || !q || !Engine.isStageDone(t.groups)) return '';
     const seeds = Core.pickQualifiers(t.sport, Engine.groupTables(t.sport, t.groups, rules()), q);
@@ -96,8 +97,9 @@
       <button class="btn primary" data-act="start-ko">Start knockout</button></div>`;
   }
 
-  function render(el, id) {
-    view = el; t = Store.get().tournaments.find(x => x.id === id);
+  // ext = a tournament opened from a code (read-only). Without it: one of your own tournaments (editable).
+  function render(el, id, ext, m) {
+    view = el; ro = !!ext; meta = m || {}; t = ext || Store.get().tournaments.find(x => x.id === id);
     if (curId !== id) { tab = 'fixtures'; curId = id; }
     if (!t) { view.innerHTML = '<section><h2>Tournament not found</h2><p><a href="#/">Back to home</a></p></section>'; return; }
     if ((tab === 'bracket' && !t.ko) || (tab === 'table' && !t.groups.length)) tab = 'fixtures';
@@ -111,7 +113,7 @@
       body = koSection();
       if (t.format !== 'knockout') body += `<details class="round" data-key="grp-results"><summary>Group stage results<span>locked</span></summary>
         ${t.groups.map(g => groupSection(g, true)).join('')}
-        <p class="mute rest">These are locked because the knockout has started. <button class="link" data-act="reopen">Reopen the group stage</button> (this clears the knockout).</p></details>`;
+        ${ro ? '<p class="mute rest">These results are locked.</p>' : '<p class="mute rest">These are locked because the knockout has started. <button class="link" data-act="reopen">Reopen the group stage</button> (this clears the knockout).</p>'}</details>`;
     } else body = t.groups.map(g => groupSection(g, false)).join('');
 
     const content = tab === 'table' ? tablesHtml() : tab === 'bracket' ? bracketHtml() : `<h2 class="fx">Fixtures</h2>${body}`;
@@ -119,6 +121,7 @@
       <p><a href="#/">&larr; All tournaments</a></p>
       <h1 class="tt">${esc(t.name)}</h1>
       <p class="mute">${esc(t.game)}, ${fmt}, ${t.players.length} entries</p>
+      ${topBar()}
       <p><button class="btn sm" data-act="pdf">Share as PDF</button></p>
       <div class="bar" aria-label="${pct}% played"><i style="width:${pct}%"></i></div>
       <p class="mute">${played} of ${all.length} matches played${t.stage === 'groups' || (t.stage === 'league' && t.settings.qualifier) ? ' (knockout matches are added later)' : ''}</p>
@@ -126,10 +129,10 @@
       ${stagePanel()}
       ${next && !t.championName || (next && t.stage === 'knockout') ? `<div class="panel glass next"><small>Next match</small>
         <div class="mrow"><span class="tm a">${e(next.a)}</span><span class="vs">vs</span><span class="tm b">${e(next.b)}</span>
-        <button class="btn primary sm" data-act="enter" data-id="${next.id}">Enter result</button></div>
+        ${ro ? '' : '<button class="btn primary sm" data-act="enter" data-id="' + next.id + '">Enter result</button>'}</div>
         ${next.roundName ? `<p class="mute">${esc(next.roundName)}</p>` : ''}</div>` : ''}
       ${tabsHtml()}${content}
-      <p class="danger"><button class="link" data-act="delete">Delete this tournament</button></p></section>`;
+      ${ro ? '' : '<p class="danger"><button class="link" data-act="delete">Delete this tournament</button></p>'}</section>`;
     view.onclick = onClick;
   }
 
@@ -191,13 +194,30 @@
       `<button type="button" role="tab" aria-selected="${tab === k}" class="${tab === k ? 'on' : ''}" data-act="tab" data-tab="${k}">${l}</button>`).join('')}</div>`;
   }
 
+  /* ---------- Share code (host) / live badge (viewer) ---------- */
+  function topBar() {
+    if (ro) return `<div class="codebar"><span class="live">Live</span><span>Hosted by <b>${esc(meta.ownerName || 'the host')}</b></span>
+      <button class="btn sm" data-act="follow">${meta.following ? 'Unfollow' : 'Follow'}</button></div>`;
+    if (!/^[A-HJ-NP-Z2-9]{6}$/.test(t.id)) return '';
+    return `<div class="codebar"><span>Share code</span><b class="code">${esc(t.id)}</b><button class="btn sm" data-act="copy">Copy</button></div>
+      <p class="mute small">Others enter this code on the home page to watch live. They cannot change anything.</p>`;
+  }
+  function copyCode(code) {
+    const ask = () => window.prompt('Copy this code:', code);
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(() => { if (window.toast) toast('Code copied: ' + code); }).catch(ask);
+    else ask();
+  }
+
   /* ---------- Clicks ---------- */
   function onClick(ev) {
     const sum = ev.target.closest('summary');
     if (sum) { const d = sum.parentNode; setTimeout(() => { opened[d.dataset.key] = d.open; }, 0); return; }
     const a = ev.target.closest('[data-act]'); if (!a) return;
     const act = a.dataset.act;
+    if (ro && ['enter', 'start-ko', 'reopen', 'delete'].includes(act)) return;   // view-only
     if (act === 'enter') openEntry(a.dataset.id);
+    else if (act === 'copy') copyCode(t.id);
+    else if (act === 'follow') { if (meta.toggle) meta.toggle(); }
     else if (act === 'pdf') {
       a.disabled = true;
       Exporter.share(t)

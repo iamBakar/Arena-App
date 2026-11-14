@@ -6,7 +6,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword,
   signOut, sendPasswordResetEmail, sendEmailVerification } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, doc, getDoc, writeBatch, serverTimestamp, collection, query, where, getDocs,
-  runTransaction, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  runTransaction, deleteDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const app = initializeApp(window.FIREBASE_CONFIG);
 const auth = getAuth(app);
@@ -34,7 +34,12 @@ const MSG = {
   'app/username-taken': 'That username is already taken. Choose another one.',
   'app/not-signed-in': 'Please log in first.',
   'app/conflict': 'This tournament was changed on another device.',
-  'app/code-failed': 'Could not make a share code. Please try again.'
+  'app/code-failed': 'Could not make a share code. Please try again.',
+  'app/bad-data': 'This tournament could not be read.',
+  'permission-denied': 'The cloud refused this. Check that your email is verified and that the latest Firebase rules are published.',
+  'unavailable': 'Cannot reach the cloud right now. Check your internet.',
+  'resource-exhausted': 'The free cloud limit for today has been reached. Try again later.',
+  'unauthenticated': 'Please log out and log in again.'
 };
 const friendly = e => MSG[e && e.code] || 'Something went wrong. Please try again.';
 const coded = code => Object.assign(new Error(code), { code });
@@ -128,7 +133,7 @@ function pack(t, rev) {
     createdAt: t.createdAt || Date.now(), updatedAt: serverTimestamp(), rev, data: JSON.stringify(t) };
 }
 // Saves only if nobody else changed it since we loaded it (rev must match), otherwise throws app/conflict.
-async function saveTournament(t) {
+async function saveOnce(t) {
   const ref = tref(t.id);
   const rev = await runTransaction(db, async tx => {
     const snap = await tx.get(ref), cur = snap.exists() ? snap.data().rev : 0;
@@ -138,16 +143,49 @@ async function saveTournament(t) {
   });
   t.rev = rev;
 }
-async function loadMine() {
+async function loadOnce() {
   const snap = await getDocs(query(collection(db, 'tournaments'), where('ownerId', '==', auth.currentUser.uid)));
   return snap.docs.map(d => { const x = d.data(), t = JSON.parse(x.data); t.id = d.id; t.rev = x.rev; t.ownerId = x.ownerId; return t; });
 }
 const deleteTournament = id => deleteDoc(tref(id));
 
+// A stale login token is a common cause of "permission-denied" right after verifying. Refresh it and try once more.
+async function retryAuth(fn) {
+  try { return await fn(); }
+  catch (e) {
+    if (e && e.code === 'permission-denied' && auth.currentUser) {
+      try { await auth.currentUser.reload(); await auth.currentUser.getIdToken(true); } catch (x) {}
+      return fn();
+    }
+    throw e;
+  }
+}
+const saveTournament = t => retryAuth(() => saveOnce(t));
+const loadMine = () => retryAuth(() => loadOnce());
+
+/* ---------- Watching someone else's tournament (read-only) + following ---------- */
+function watchTournament(code, onData, onError) {
+  return onSnapshot(tref(code), snap => {
+    if (!snap.exists()) return onData(null);
+    const x = snap.data(); let t;
+    try { t = JSON.parse(x.data); } catch (e) { return onError(coded('app/bad-data')); }
+    t.id = snap.id;
+    onData({ t, ownerId: x.ownerId, ownerName: x.ownerName, name: x.name, game: x.game });
+  }, err => onError(err));
+}
+const fref = code => doc(db, 'users', auth.currentUser.uid, 'following', code);
+const follow = (code, info) => setDoc(fref(code), { code, name: String(info.name || '').slice(0, 60), game: String(info.game || '').slice(0, 40),
+  ownerName: String(info.ownerName || '').slice(0, 20), followedAt: Date.now() });
+const unfollow = code => deleteDoc(fref(code));
+function onFollowing(cb) {
+  return onSnapshot(collection(db, 'users', auth.currentUser.uid, 'following'),
+    s => cb(s.docs.map(d => d.data()).sort((a, b) => b.followedAt - a.followedAt)), () => cb([]));
+}
+
 window.Cloud = {
   onAuth(f) { listeners.push(f); if (last.ready) f(last); },
   signUp, logIn, claimProfile, checkVerified, resendVerification, friendly, validUsername, track,
-  newCode, saveTournament, loadMine, deleteTournament,
+  newCode, saveTournament, loadMine, deleteTournament, watchTournament, follow, unfollow, onFollowing,
   note: () => note,
   logOut: () => signOut(auth),
   resetPassword: email => sendPasswordResetEmail(auth, String(email).trim(), { url: verifyUrl() })

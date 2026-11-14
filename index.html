@@ -23,6 +23,7 @@
 <header class="top glass">
   <a class="brand" href="#/" aria-label="Arena home">ARENA<i></i></a>
   <div class="tools">
+    <button id="syncPill" class="pill" type="button" hidden></button>
     <button id="themeBtn" class="icon" type="button"></button>
     <button id="profileBtn" class="chip" type="button"></button>
   </div>
@@ -42,6 +43,7 @@
 <script type="module" src="cloud.js"></script>
 <script src="auth.js"></script>
 <script src="sync.js"></script>
+<script src="watch.js"></script>
 <script src="app.js"></script>
 <script>
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {

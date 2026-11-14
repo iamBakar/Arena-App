@@ -254,3 +254,19 @@ main input[type="email"]:focus, main input[type="password"]:focus { border-color
 .eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; display: grid; place-items: center;
   background: none; border: 0; border-radius: 8px; color: var(--mute); cursor: pointer; }
 .eye:hover { color: var(--ink); }
+
+/* ---------- Share code, live badge, join box, sync badge ---------- */
+.codebar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 14px 0 4px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; max-width: 520px; }
+.codebar .code { font: 700 1.6rem/1 var(--display); letter-spacing: .18em; padding: 4px 10px; background: var(--field); border-radius: 8px; border: 1px dashed var(--orange); }
+.codebar .btn.sm { margin-left: auto; }
+.live { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: .85rem; }
+.live::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: #e53935; animation: pulse 1.6s infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+.join { margin: 28px 0 0; max-width: none; }
+.joinrow { display: flex; gap: 10px; margin-top: 12px; max-width: 420px; }
+.joinrow input { flex: 1; margin-top: 0; text-transform: uppercase; letter-spacing: .2em; font-weight: 700; text-align: center; }
+.pill { font: 700 .8rem var(--body); padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--mute); cursor: default; }
+.pill[data-state="saved"] { color: var(--blue); }
+.pill[data-state="error"], .pill[data-state="offline"] { color: #d93025; border-color: #d93025; cursor: pointer; }
+:root[data-theme="dark"] .pill[data-state="error"], :root[data-theme="dark"] .pill[data-state="offline"] { color: #ff8a80; border-color: #ff8a80; }
+@media (prefers-reduced-motion: reduce) { .live::before { animation: none; } }
