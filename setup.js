@@ -8,8 +8,8 @@
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   const GAMES = {
-    fc:      { label: 'FC 27',      sport: 'football', hint: 'Goals scored. 3 points for a win.' },
-    tekken:  { label: 'Tekken 8',   sport: 'tekken',   hint: 'Rounds won. A win is all that counts.' },
+    fc:      { label: 'FC',         sport: 'football', hint: 'Goals scored. 3 points for a win.' },
+    tekken:  { label: 'Tekken',     sport: 'tekken',   hint: 'Rounds won. A win is all that counts.' },
     cricket: { label: 'Cricket',    sport: 'cricket',  hint: 'Runs and overs. 2 points for a win.' },
     other:   { label: 'Other game', sport: null,       hint: 'Type its name and pick how it is scored.' }
   };
@@ -105,7 +105,7 @@
     const v = Core.validateSetup({ count: n, format: d.format, groups: d.groupCount });
     const fmt = { league: 'League', knockout: 'Knockout', groups: 'Groups + knockout' }[d.format];
     const rows = [
-      ['Game', esc(gameName(d)) + ' (' + Core.SPORTS[sport].label + ' rules)'],
+      ['Game', esc(gameName(d)) + (d.game === 'other' ? ' (scored by ' + { football: 'goals', cricket: 'runs and overs', tekken: 'rounds' }[sport] + ')' : '')],
       ['Name', esc(d.name.trim() || gameName(d) + ' tournament')],
       ['Entries', n + ', ' + (d.seeding === 'random' ? 'random draw' : 'in your order')],
       ['Format', fmt + (d.format !== 'knockout' ? ', ' + d.repeats + 'x' : '') + (d.format === 'groups' ? ', ' + d.groupCount + ' groups' : '')],
@@ -141,7 +141,8 @@
   }
 
   /* ---------- Create the tournament ---------- */
-  function start() {
+  async function start() {
+    const cloudOn = !!(window.Sync && Sync.active());
     const d = draft, ns = names(d), sport = sportOf(d), n = ns.length;
     const players = ns.map((name, i) => ({ id: 'p' + (i + 1), name }));
     const order = players.map(p => p.id);
@@ -149,7 +150,7 @@
     const q = chosenQ(d, n), kt = koTeams(d, n);
     const koOpts = { twoLegSemis: !!(d.two && kt >= 4 && Core.SPORTS[sport].allowLegs), thirdPlace: !!(d.third && kt >= 4) };
     const t = {
-      id: Store.uid(), name: d.name.trim() || gameName(d) + ' tournament', game: gameName(d), sport, format: d.format,
+      id: cloudOn ? await Cloud.newCode() : Store.uid(), ownerId: cloudOn ? Sync.uid() : undefined, name: d.name.trim() || gameName(d) + ' tournament', game: gameName(d), sport, format: d.format,
       status: 'running', createdAt: Date.now(), players, championName: null, groups: [], ko: null,
       settings: { repeats: d.format === 'knockout' ? 1 : d.repeats, groupCount: d.groupCount, qualifier: q && q.total ? q : null,
         koOpts, points: points(d), maxOvers: d.maxOvers, seeding: d.seeding }
@@ -157,6 +158,7 @@
     if (d.format === 'league') { t.groups = Core.buildLeague(seeds, d.repeats).groups; t.stage = 'league'; }
     else if (d.format === 'groups') { t.groups = Core.buildGroups(seeds, d.groupCount, d.repeats).groups; t.stage = 'groups'; }
     else { t.ko = Core.buildKnockout(seeds, koOpts); t.stage = 'knockout'; }
+    if (cloudOn) Cloud.track('create_tournament', { sport, format: d.format });
     draft = null;
     location.hash = '#/t/' + t.id;           // set first so the store refresh lands on the right page
     Store.commit(s => { s.tournaments.unshift(t); });
@@ -210,7 +212,7 @@
       else if (act === 'next') {
         const err = validate(draft);
         if (err) $('#err').textContent = err; else { draft.step++; render(true); }
-      } else if (act === 'start') start();
+      } else if (act === 'start') start().catch(() => { $('#err').textContent = 'Could not create the tournament. Check your internet connection and try again.'; });
     };
   }
 

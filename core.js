@@ -9,7 +9,7 @@
   const SPORTS = {
     football: { label: 'FC (Football)', points: { win: 3, draw: 1, loss: 0 }, hasDraw: true,  koTiebreak: 'Penalties',  allowLegs: true,  tiebreak: ['pts', 'gd', 'gf'] },
     cricket:  { label: 'Cricket',       points: { win: 2, draw: 1, loss: 0 }, hasDraw: true,  koTiebreak: 'Super over', allowLegs: false, tiebreak: ['pts', 'w', 'nrr'], maxOvers: 20 },
-    tekken:   { label: 'Tekken 8',      points: { win: 1, draw: 0, loss: 0 }, hasDraw: false, koTiebreak: null,         allowLegs: true,  tiebreak: ['pts', 'gd', 'gf'] }
+    tekken:   { label: 'Tekken',      points: { win: 1, draw: 0, loss: 0 }, hasDraw: false, koTiebreak: null,         allowLegs: true,  tiebreak: ['pts', 'gd', 'gf'] }
   };
 
   /* ---------- Small helpers ---------- */
@@ -191,7 +191,7 @@
       else { A.d++; B.d++; A.pts += pts.draw; B.pts += pts.draw; }
 
       if (sport === 'cricket') {
-        if (m.result.winner === 'nr') return; // no result: points only, NRR unaffected
+        if (m.result.winner === 'nr' || m.result.wo) return; // no result / walkover: points only, NRR unaffected
         const ra = m.result.a, rb = m.result.b;
         const ballsA = ra.allOut ? maxOvers * 6 : oversToBalls(ra.overs);
         const ballsB = rb.allOut ? maxOvers * 6 : oversToBalls(rb.overs);

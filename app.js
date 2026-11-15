@@ -184,7 +184,7 @@
     return `
       <section class="hero">
         <h1>Ready, ${esc(p.name)}?</h1>
-        <p>Pick a game, add your players, and enter each result as the matches finish. Arena builds the fixtures and tables.</p>
+        <p>Pick a game, add your players, and enter each result as the matches finish.</p>
         <a class="cta" href="#/new">New tournament</a>
       </section>
       ${acct.mode === 'in' ? joinBox() : ''}
@@ -193,12 +193,12 @@
       ${acct.mode === 'in' ? followSection() : ''}`;
   }
   const joinBox = () => `<section class="panel glass join"><h2>Watch a tournament</h2>
-    <p class="mute">Got a code from a host? Enter it to follow the fixtures and tables live. You can only view, not change anything.</p>
+    <p class="mute">Got a code from a host? Enter it to follow the fixtures and tables live.</p>
     <form id="joinForm" class="joinrow"><input type="text" name="code" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="K7M2QX" aria-label="Tournament code">
     <button class="btn primary">Watch</button></form><p id="joinErr" class="err" role="alert"></p></section>`;
   const followSection = () => `<section><h2>Following</h2>${following.length ? `<div class="grid">${following.map(f =>
     `<a class="tcard glass" href="#/v/${esc(f.code)}"><h3>${esc(f.name)}</h3><p>${esc(f.game)}, hosted by ${esc(f.ownerName || 'a host')}</p><p>Code ${esc(f.code)}</p></a>`).join('')}</div>`
-    : '<p class="empty glass">Tournaments you open with a code are saved here, so you never need to enter the code again.</p>'}</section>`;
+    : '<p class="empty glass">Tournaments you open with a code are saved here.</p>'}</section>`;
   function bindHome() {
     const f = $('#joinForm'); if (!f) return;
     f.addEventListener('submit', ev => {

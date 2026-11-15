@@ -315,3 +315,7 @@ main input[type="email"]:focus, main input[type="password"]:focus { border-color
 dialog textarea, dialog select { width: 100%; margin-top: 6px; padding: 11px 14px; font: 1rem var(--body); color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: 10px; }
 dialog textarea { resize: vertical; min-height: 110px; }
 dialog textarea:focus, dialog select:focus { border-color: var(--blue); outline: none; }
+
+/* ---------- Result: score with the winner underneath ---------- */
+.res { display: flex; flex-direction: column; align-items: center; text-align: center; line-height: 1.25; }
+.sub { color: var(--mute); font-size: .78rem; font-weight: 500; margin-top: 1px; }

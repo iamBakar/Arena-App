@@ -33,25 +33,31 @@
   }
 
   /* ---------- Result text ---------- */
-  function resText(m) {
-    const r = m.result; if (!r) return '';
-    if (r.wo) return esc(nm(r.winner === 'a' ? m.a : m.b) + ' (walkover)');
+  // The score on one line and who won (and how) underneath. Both parts are already escaped.
+  function resParts(m) {
+    const r = m.result; if (!r) return { main: '', sub: '' };
+    const win = side => nm(side === 'a' ? m.a : m.b);
+    if (r.wo) return { main: 'Walkover', sub: esc(win(r.winner) + ' won') };
     if (t.sport === 'cricket') {
-      if (r.winner === 'nr') return 'No result';
-      const base = r.a.runs + ' v ' + r.b.runs;
-      return esc(r.winner === 'tie' ? base + ', tie' : base + ', ' + nm(r.winner === 'a' ? m.a : m.b) + ' won');
+      if (r.winner === 'nr') return { main: 'No result', sub: '' };
+      return { main: r.a.runs + ' v ' + r.b.runs, sub: r.winner === 'tie' ? 'Tie' : esc(win(r.winner) + ' won') };
     }
-    let s = r.legs ? r.legs.map(l => l.a + '-' + l.b).join(', ') : r.a + ' - ' + r.b;
-    if (r.legs && r.legs.length === 2) s += ' (agg ' + (r.legs[0].a + r.legs[1].a) + '-' + (r.legs[0].b + r.legs[1].b) + ')';
-    if (r.decider) s += ', ' + tiebreak() + ': ' + nm(r.decider === 'a' ? m.a : m.b);
-    return esc(s);
+    const how = tiebreak().toLowerCase();                          // "penalties" or "decider game"
+    if (r.legs) {
+      const main = r.legs.map(l => l.a + '-' + l.b).join(', ');
+      if (r.legs.length < 2) return { main, sub: 'Leg 1 played' };
+      const A = r.legs[0].a + r.legs[1].a, B = r.legs[0].b + r.legs[1].b;
+      return { main, sub: esc(A === B ? win(r.decider) + ' won on ' + how + ' (aggregate ' + A + '-' + B + ')'
+        : win(A > B ? 'a' : 'b') + ' won ' + Math.max(A, B) + '-' + Math.min(A, B) + ' on aggregate') };
+    }
+    return { main: r.a + ' - ' + r.b, sub: r.decider ? esc(win(r.decider) + ' won on ' + how) : '' };
   }
 
   /* ---------- Rows ---------- */
   function row(m, locked) {
     if (m.bye) return `<div class="mrow bye"><span class="tm a">${e(m.winner)}</span><span class="vs">advances (bye)</span></div>`;
     const done = isDone(m), ready = m.a && m.b;
-    const mid = m.result ? `<b class="score">${resText(m)}</b>` : '<span class="vs">vs</span>';
+    const mid = m.result ? (() => { const p = resParts(m); return `<span class="res"><b class="score">${p.main}</b>${p.sub ? `<small class="sub">${p.sub}</small>` : ''}</span>`; })() : '<span class="vs">vs</span>';
     const label = done ? 'Edit' : (m.result ? 'Enter leg 2' : 'Enter result');
     const enter = (ready && !locked && !ro) ? `<button class="btn sm" data-act="enter" data-id="${m.id}">${label}</button>` : '';
     const delayBtn = (agenda && enter && !done && t.schedule) ? `<button class="btn sm" data-act="delay" data-id="${m.id}">Delay</button>` : '';
@@ -303,7 +309,7 @@
       <button class="btn sm" data-act="follow">${meta.following ? 'Unfollow' : 'Follow'}</button></div>`;
     if (!/^[A-HJ-NP-Z2-9]{6}$/.test(t.id)) return '';
     return `<div class="codebar"><span>Share code</span><b class="code">${esc(t.id)}</b><button class="btn sm" data-act="copy">Copy</button></div>
-      <p class="mute small">Others enter this code on the home page to watch live. They cannot change anything.</p>`;
+      <p class="mute small">Others enter this code on the home page to watch live.</p>`;
   }
   function copyCode(code) {
     const ask = () => window.prompt('Copy this code:', code);
