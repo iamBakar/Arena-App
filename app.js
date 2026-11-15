@@ -74,9 +74,53 @@
 
   const timeBlock = () => { const tf = Store.get().settings.timeFormat || '24h'; return `<hr><h3>Time format</h3><p class="mute">How match times are shown on this device.</p>
     <div class="row"><button type="button" class="btn sm ${tf === '24h' ? 'on' : ''}" data-tf="24h">24-hour</button><button type="button" class="btn sm ${tf === '12h' ? 'on' : ''}" data-tf="12h">12-hour</button></div>`; };
+  const feedbackBlock = () => `<hr><h3>Feedback</h3><p class="mute">Found a problem or have an idea? Tell me.</p>
+    <div class="row"><button type="button" class="btn sm" id="fbOpen">Send feedback</button></div>`;
   const diagBlock = () => `<hr><h3>Cloud connection</h3><p class="mute">If a tournament says "Not saved", run this check to see exactly what the cloud is refusing.</p>
     <div class="row"><button type="button" class="btn sm" id="diag">Check cloud connection</button></div>`;
-  const extrasHtml = () => timeBlock() + (acct.mode === 'in' ? diagBlock() : '') + installBlock();
+  const extrasHtml = () => timeBlock() + (acct.mode === 'in' ? feedbackBlock() + diagBlock() : '') + installBlock();
+  /* ---------- Feedback / report a problem ---------- */
+  const APP_VERSION = 'v12 beta', FB_KEY = 'arena.fb';
+  const techDetails = () => ['App ' + APP_VERSION, 'Page ' + (location.hash || '#/'), 'Online ' + (navigator.onLine !== false),
+    'Save status ' + (Sync.status().state + (Sync.status().msg ? ' - ' + Sync.status().msg : '')), 'Screen ' + window.innerWidth + 'x' + window.innerHeight, navigator.userAgent || ''].join(' | ').slice(0, 600);
+  function fbLimit() {                                   // a polite limit on this device: 1 message per 30 seconds, 5 per day
+    try {
+      const d = JSON.parse(localStorage.getItem(FB_KEY) || '{}'), day = new Date().toISOString().slice(0, 10), n = d.day === day ? d.n : 0;
+      if (Date.now() - (d.t || 0) < 30000) return 'Please wait a little before sending another message.';
+      if (n >= 5) return "You've reached today's limit of 5 messages. Thank you!";
+    } catch (e) {}
+    return '';
+  }
+  function fbMark() {
+    try { const day = new Date().toISOString().slice(0, 10), d = JSON.parse(localStorage.getItem(FB_KEY) || '{}'); localStorage.setItem(FB_KEY, JSON.stringify({ t: Date.now(), day, n: (d.day === day ? d.n : 0) + 1 })); } catch (e) {}
+  }
+  function openFeedback() {
+    if (!window.Cloud || acct.mode !== 'in') return;
+    dlg.innerHTML = `<form id="fbf"><h2>Send feedback</h2>
+      <p class="mute">Found a bug or have an idea? Tell me. Only the app owner can read this. Please do not write passwords or private details.</p>
+      <label class="field">What is it about?<select name="kind"><option value="problem">Report a problem</option><option value="idea">Suggest an idea</option><option value="other">Something else</option></select></label>
+      <label class="field">Your message<textarea name="message" rows="5" maxlength="1000" placeholder="What happened, or what would you like to see?" required></textarea></label>
+      <p class="mute small"><span id="fbCount">0</span> / 1000</p>
+      <label class="tick"><input type="checkbox" name="tech" checked> Include technical details to help fix problems (page, browser, app version and save status)</label>
+      <p id="fbErr" class="err" role="alert"></p>
+      <div class="row"><button class="btn primary">Send</button><button type="button" class="btn" id="fbCancel">Cancel</button></div></form>`;
+    if (!dlg.open) dlg.showModal();
+    const f = $('#fbf');
+    f.elements.message.addEventListener('input', () => { $('#fbCount').textContent = f.elements.message.value.length; });
+    $('#fbCancel').addEventListener('click', () => dlg.close());
+    f.addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const msg = f.elements.message.value.trim(), err = $('#fbErr'), btn = f.querySelector('button.primary');
+      err.textContent = '';
+      if (msg.length < 5) { err.textContent = 'Please write at least a few words.'; return; }
+      const lim = fbLimit(); if (lim) { err.textContent = lim; return; }
+      btn.disabled = true;
+      try { await Cloud.sendFeedback({ kind: f.elements.kind.value, message: msg, details: f.elements.tech.checked ? techDetails() : '' }); fbMark(); dlg.close(); toast('Thank you! Your feedback was sent.'); }
+      catch (e) { err.textContent = Cloud.friendly(e); btn.disabled = false; }
+    });
+  }
+  const fbLink = $('#fbLink'); if (fbLink) fbLink.addEventListener('click', openFeedback);
+
   async function runDiag() {
     dlg.innerHTML = '<h2>Checking...</h2><p class="mute">This takes a few seconds.</p>';
     let res;
@@ -87,6 +131,7 @@
   }
   function bindExtras() {
     const dg = $('#diag'); if (dg) dg.addEventListener('click', runDiag);
+    const fo = $('#fbOpen'); if (fo) fo.addEventListener('click', openFeedback);
     document.querySelectorAll('[data-tf]').forEach(b => b.addEventListener('click', () => {
       Store.commit(s => { s.settings.timeFormat = b.dataset.tf; });
       if ($('#logout')) openAccount(); else openProfile(false);
@@ -191,7 +236,8 @@
   }
 
   /* ---------- Boot ---------- */
-  function refresh() { applyTheme(); renderProfileChip(); }
+  function refresh() {
+    const ft = $('#foot'); if (ft) ft.hidden = acct.mode !== 'in'; applyTheme(); renderProfileChip(); }
   Store.subscribe(() => { refresh(); if (dlg.open === false) route(); else if (Store.get().profile) route(); });
   window.addEventListener('hashchange', route);
   function onCloud(s) {

@@ -7,7 +7,7 @@ import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWith
   signOut, sendPasswordResetEmail, sendEmailVerification } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check.js";
 import { getFirestore, doc, getDoc, writeBatch, serverTimestamp, collection, query, where, getDocs,
-  runTransaction, deleteDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  runTransaction, deleteDoc, setDoc, onSnapshot, addDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const app = initializeApp(window.FIREBASE_CONFIG);
 
@@ -226,8 +226,17 @@ async function diagnose(list) {
   return out;
 }
 
+/* ---------- Feedback / problem reports (readable only by the app owner, in the Firebase console) ---------- */
+async function sendFeedback(f) {
+  const u = auth.currentUser;
+  if (!u || !last.profile) throw coded('app/not-signed-in');
+  await addDoc(collection(db, 'feedback'), { uid: u.uid, username: last.profile.username, kind: f.kind, message: String(f.message).slice(0, 1000),
+    details: String(f.details || '').slice(0, 600), createdAt: serverTimestamp() });
+  track('send_feedback', { kind: f.kind });
+}
+
 window.Cloud = {
-  diagnose,
+  diagnose, sendFeedback,
   onAuth(f) { listeners.push(f); if (last.ready) f(last); },
   signUp, logIn, claimProfile, checkVerified, resendVerification, friendly, validUsername, track,
   newCode, saveTournament, loadMine, deleteTournament, watchTournament, follow, unfollow, onFollowing,

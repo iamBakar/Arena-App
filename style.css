@@ -308,3 +308,10 @@ main input[type="email"]:focus, main input[type="password"]:focus { border-color
 .diag li.ok { border-left: 4px solid var(--blue); }
 .diag li.bad { border-left: 4px solid #d93025; }
 .diag span { color: var(--mute); font-size: .9rem; overflow-wrap: anywhere; }
+
+/* ---------- Feedback ---------- */
+.foot { text-align: center; padding: 8px 16px 40px; font-size: .9rem; }
+.foot .link { color: var(--mute); }
+dialog textarea, dialog select { width: 100%; margin-top: 6px; padding: 11px 14px; font: 1rem var(--body); color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: 10px; }
+dialog textarea { resize: vertical; min-height: 110px; }
+dialog textarea:focus, dialog select:focus { border-color: var(--blue); outline: none; }
